@@ -10,6 +10,13 @@ const MAX_RESULTS = 10;
 /** Each snippet is cut to this many characters. */
 const SNIPPET_CHARS = 400;
 
+/** How long an identical query reuses its answer. */
+const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
+/** How long a backend that answered with a rate limit is skipped. */
+const DEFAULT_COOLDOWN_MS = 60_000;
+/** Errors that mean "slow down" rather than "this backend is broken". */
+const RATE_LIMIT = /\b(429|202|403)\b|rate.?limit|too many|challenge|anomaly/i;
+
 const USER_AGENT =
   "Mozilla/5.0 (compatible; pi-harness-example/0.1; +https://developers.cloudflare.com/agents/)";
 
@@ -18,6 +25,11 @@ const DEFAULT_SECTION =
   "releases, prices, documentation and news; prefer primary sources, and say " +
   "plainly when a result looks stale. It returns titles, URLs and short " +
   "snippets, not page contents.";
+
+export interface BrowserRunner {
+  /** Load a URL in a real browser and return the rendered HTML. */
+  html(url: string, signal: AbortSignal): Promise<string>;
+}
 
 export interface WebSearchOptions {
   /** SearXNG `language` parameter, such as `en` or `all`. */
@@ -32,6 +44,12 @@ export interface WebSearchOptions {
   fetch?: typeof fetch;
   /** Replaces the prompt section; `false` installs the tool without one. */
   section?: string | false;
+  /** A real browser, for engines that block a Worker's own fetches. */
+  browser?: BrowserRunner;
+  /** Reuse a successful answer for this long, in milliseconds. 0 disables. */
+  cacheTtlMs?: number;
+  /** Skip a rate-limited backend for this long, in milliseconds. 0 disables. */
+  cooldownMs?: number;
 }
 
 const SearchParameters = Type.Object({
@@ -205,6 +223,32 @@ function parseDuckDuckGo(html: string): SearchHit[] {
   return hits;
 }
 
+/** The result rows of DuckDuckGo's Lite endpoint. */
+function parseDuckDuckGoLite(html: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  const anchors = [
+    ...html.matchAll(/<a\b([^>]*\bresult-link\b[^>]*)>([\s\S]*?)<\/a>/gi)
+  ];
+  for (const [index, anchor] of anchors.entries()) {
+    const url = unwrapDuckDuckGo(hrefOf(anchor[1]));
+    if (!url) continue;
+    const start = (anchor.index ?? 0) + anchor[0].length;
+    const end =
+      index + 1 < anchors.length
+        ? (anchors[index + 1].index ?? html.length)
+        : html.length;
+    const snippet = /<td\b[^>]*\bresult-snippet\b[^>]*>([\s\S]*?)<\/td>/i.exec(
+      html.slice(start, end)
+    );
+    hits.push({
+      title: textOf(anchor[2]).slice(0, 200) || url,
+      url: url.slice(0, 500),
+      snippet: snippet ? textOf(snippet[1]).slice(0, SNIPPET_CHARS) : ""
+    });
+  }
+  return hits;
+}
+
 /** SearXNG through `format=json`, which the instance must enable. */
 function createSearxngProvider(
   base: string,
@@ -308,6 +352,47 @@ function createDuckDuckGoProvider(doFetch: typeof fetch): Provider {
   };
 }
 
+/** DuckDuckGo's Lite endpoint: a second host with a simpler page. */
+function createDuckDuckGoLiteProvider(doFetch: typeof fetch): Provider {
+  return {
+    name: "duckduckgo-lite",
+    async search(query, limit, signal) {
+      const endpoint = new URL("https://lite.duckduckgo.com/lite/");
+      endpoint.searchParams.set("q", query);
+      const response = await doFetch(endpoint, {
+        signal,
+        headers: { accept: "text/html", "user-agent": USER_AGENT }
+      });
+      if (!response.ok) {
+        throw new Error(`DuckDuckGo Lite returned ${response.status}`);
+      }
+      const html = await response.text();
+      const hits = parseDuckDuckGoLite(html).slice(0, limit);
+      if (hits.length === 0 && /anomaly|unusual traffic|challenge/i.test(html)) {
+        throw new Error("DuckDuckGo Lite served a bot challenge instead of results");
+      }
+      return { hits, answers: [], suggestions: [], unavailable: [] };
+    }
+  };
+}
+
+/** DuckDuckGo through a real Chromium, which passes what Worker fetches cannot. */
+function createBrowserProvider(runner: BrowserRunner): Provider {
+  return {
+    name: "browser",
+    async search(query, limit, signal) {
+      const endpoint = new URL("https://html.duckduckgo.com/html/");
+      endpoint.searchParams.set("q", query);
+      const html = await runner.html(endpoint.toString(), signal);
+      const hits = parseDuckDuckGo(html).slice(0, limit);
+      if (hits.length === 0) {
+        throw new Error("the browser page had no parseable results");
+      }
+      return { hits, answers: [], suggestions: [], unavailable: [] };
+    }
+  };
+}
+
 function formatOutcome(query: string, outcome: SearchOutcome, limit: number): string {
   const lines: string[] = [];
 
@@ -358,7 +443,16 @@ export function createWebSearchExtension(
   if (base !== null) {
     providers.push(createSearxngProvider(base, options, doFetch));
   }
+  if (options.browser) {
+    providers.push(createBrowserProvider(options.browser));
+  }
   providers.push(createDuckDuckGoProvider(doFetch));
+  providers.push(createDuckDuckGoLiteProvider(doFetch));
+
+  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+  const cache = new Map<string, { text: string; expires: number }>();
+  const cooling = new Map<string, number>();
 
   const defaultResults = Math.min(
     Math.max(options.defaultResults ?? DEFAULT_RESULTS, 1),
@@ -375,9 +469,19 @@ export function createWebSearchExtension(
     replay: "safe",
     async execute({ query, maxResults, category, timeRange }, _api, context) {
       const limit = Math.min(Math.max(maxResults ?? defaultResults, 1), MAX_RESULTS);
+      const key = [query, limit, category ?? "", timeRange ?? ""].join("\u0000");
+      if (cacheTtlMs > 0) {
+        const cached = cache.get(key);
+        if (cached && cached.expires > Date.now()) return textResult(cached.text);
+        if (cached) cache.delete(key);
+      }
 
       const errors: string[] = [];
       for (const provider of providers) {
+        if ((cooling.get(provider.name) ?? 0) > Date.now()) {
+          errors.push(`${provider.name}: skipped after a rate limit`);
+          continue;
+        }
         const timeout = AbortSignal.timeout(timeoutMs);
         const signal = context.abortSignal
           ? AbortSignal.any([context.abortSignal, timeout])
@@ -387,22 +491,29 @@ export function createWebSearchExtension(
             category,
             timeRange
           });
-          return textResult(formatOutcome(query, outcome, limit));
+          const answer = formatOutcome(query, outcome, limit);
+          if (cacheTtlMs > 0) {
+            cache.set(key, { text: answer, expires: Date.now() + cacheTtlMs });
+          }
+          return textResult(answer);
         } catch (error) {
           if (context.abortSignal?.aborted) throw error;
-          errors.push(
-            `${provider.name}: ${
-              error instanceof Error && error.name === "TimeoutError"
-                ? `did not answer within ${timeoutMs} ms`
-                : error instanceof Error
-                  ? error.message
-                  : String(error)
-            }`
-          );
+          const message =
+            error instanceof Error && error.name === "TimeoutError"
+              ? `did not answer within ${timeoutMs} ms`
+              : error instanceof Error
+                ? error.message
+                : String(error);
+          if (cooldownMs > 0 && RATE_LIMIT.test(message)) {
+            cooling.set(provider.name, Date.now() + cooldownMs);
+          }
+          errors.push(`${provider.name}: ${message}`);
         }
       }
 
-      return errorResult(`web search failed. ${errors.join(" ")}`);
+      return errorResult(
+        `web search failed. ${errors.join(" ")} Set SEARXNG_URL to an instance you control to avoid public rate limits.`
+      );
     }
   };
 

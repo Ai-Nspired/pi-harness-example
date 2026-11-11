@@ -8,6 +8,9 @@
   // Optional: prefer a SearXNG instance with "json" in `search.formats`.
   // Empty searches through DuckDuckGo instead.
   "vars": { "SEARXNG_URL": "" },
+  // Real Chromium for web search, so a rate-limited page can still be read.
+  // Needs the Workers Paid plan.
+  "browser": { "binding": "BROWSER" },
   // `exec` runs JavaScript in Dynamic Workers minted through this.
   "worker_loaders": [{ "binding": "LOADER" }],
   "assets": {

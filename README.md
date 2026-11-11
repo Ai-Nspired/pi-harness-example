@@ -216,10 +216,15 @@ local runs), for a self-hosted or public instance whose `settings.yml` lists
 "vars": { "SEARXNG_URL": "https://searx.example.com" }
 ```
 
-It works with no configuration: with `SEARXNG_URL` empty the tool searches
-through DuckDuckGo's HTML endpoint, which needs no key and no instance. When
-`SEARXNG_URL` is set, SearXNG is tried first and DuckDuckGo is the fallback
-if that instance errors, so one broken backend does not take search away.
+It works with no configuration. Backends are tried in order: SearXNG when
+`SEARXNG_URL` is set, then a real Chromium through Browser Rendering (the
+`BROWSER` binding, Workers Paid), then DuckDuckGo's HTML endpoint, then its
+Lite endpoint. Because a browser session looks like a browser, it is the
+backend that survives rate limiting and bot challenges; the HTTP endpoints
+are the cheap fallbacks. Identical queries are cached for five minutes and a
+backend that answers with a rate limit is skipped for one minute, so a burst
+of searches does not hammer one engine.
+
 SearXNG also honours `language` and `safeSearch`, and the tool takes `query`,
 `maxResults` (1–10), `category` (`general` or `news`) and `timeRange`
 (`day`, `week`, `month`, `year`) where the backend supports them. Searches

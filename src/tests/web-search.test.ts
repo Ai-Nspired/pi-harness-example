@@ -49,6 +49,19 @@ const DDG_HTML = `
   </div>
 </div>`;
 
+/** Two rows in DuckDuckGo Lite's markup, with its redirector links. */
+const LITE_HTML = `
+<table>
+  <tr><td>&nbsp;</td><td>
+    <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Flite-one&amp;rut=a" class='result-link'>Lite Result One</a>
+  </td></tr>
+  <tr><td>&nbsp;</td><td class='result-snippet'>Snippet for the lite result.</td></tr>
+  <tr><td>&nbsp;</td><td>
+    <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Flite-two&amp;rut=b" class='result-link'>Lite Result Two</a>
+  </td></tr>
+  <tr><td>&nbsp;</td><td class='result-snippet'>Second lite snippet.</td></tr>
+</table>`;
+
 describe("the web search extension", () => {
   it("is installed with no configuration, searching DuckDuckGo", async () => {
     const requests: string[] = [];
@@ -149,5 +162,92 @@ describe("the web search extension", () => {
 
     expect(result.isError).toBeFalsy();
     expect(text(result)).toContain("No results for \"nothing at all\"");
+  });
+
+  it("uses a real browser before DuckDuckGo's HTTP endpoints", async () => {
+    let browserCalls = 0;
+    const requests: string[] = [];
+    const extension = createWebSearchExtension(undefined, {
+      cacheTtlMs: 0,
+      browser: {
+        async html(url) {
+          browserCalls += 1;
+          expect(url).toContain("duckduckgo.com/html/");
+          return DDG_HTML;
+        }
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return new Response("should not be reached", { status: 500 });
+      }
+    });
+
+    const result = await run(extension, { query: "durable objects" });
+
+    expect(result.isError).toBeFalsy();
+    expect(browserCalls).toBe(1);
+    expect(requests).toHaveLength(0);
+    expect(text(result)).toContain("Durable Objects & limits");
+  });
+
+  it("falls back to the Lite endpoint when the HTML one is rate limited", async () => {
+    const requests: string[] = [];
+    const extension = createWebSearchExtension(undefined, {
+      cacheTtlMs: 0,
+      cooldownMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("html.duckduckgo.com")) {
+          return new Response("Too many requests", { status: 429 });
+        }
+        return new Response(LITE_HTML, { headers: { "content-type": "text/html" } });
+      }
+    });
+
+    const result = await run(extension, { query: "durable objects" });
+
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toContain("Lite Result One");
+    expect(requests).toHaveLength(2);
+  });
+
+  it("reuses an identical query from the cache", async () => {
+    let calls = 0;
+    const extension = createWebSearchExtension(undefined, {
+      fetch: async () => {
+        calls += 1;
+        return new Response(DDG_HTML, { headers: { "content-type": "text/html" } });
+      }
+    });
+
+    await run(extension, { query: "durable objects" });
+    await run(extension, { query: "durable objects" });
+
+    expect(calls).toBe(1);
+  });
+
+  it("skips a backend that rate-limited us", async () => {
+    const requests: string[] = [];
+    const extension = createWebSearchExtension(undefined, {
+      cacheTtlMs: 0,
+      cooldownMs: 60_000,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("html.duckduckgo.com")) {
+          return new Response("Too many requests", { status: 429 });
+        }
+        return new Response(LITE_HTML, { headers: { "content-type": "text/html" } });
+      }
+    });
+
+    await run(extension, { query: "first" });
+    requests.length = 0;
+    const second = await run(extension, { query: "second" });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain("lite.duckduckgo.com");
+    expect(second.isError).toBeFalsy();
   });
 });

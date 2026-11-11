@@ -3,6 +3,7 @@
 interface __BaseEnv_Env {
   LOADER: WorkerLoader;
   AI: Ai;
+  BROWSER: Fetcher;
   SEARXNG_URL: string;
   PiAgent: DurableObjectNamespace<import("./src/server").PiAgent>;
 }

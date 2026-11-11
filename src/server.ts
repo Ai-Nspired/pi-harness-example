@@ -1,3 +1,4 @@
+import puppeteer from "@cloudflare/puppeteer";
 import { DurableObject } from "cloudflare:workers";
 import { Workspace, type DurableObjectStorageLike } from "@cloudflare/computer";
 import { WorkerJavaScriptBackend } from "@cloudflare/computer/backends/worker-javascript";
@@ -15,6 +16,36 @@ import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
 const MODEL_ID = "@cf/zai-org/glm-5.3-flash";
+
+/**
+ * A real Chromium through Browser Rendering. Worker fetches to DuckDuckGo can
+ * be rate limited or challenged; a browser session gets its own fingerprint.
+ */
+function createBrowserRunner(env: Env) {
+  return {
+    async html(url: string, signal: AbortSignal): Promise<string> {
+      const browser = await puppeteer.launch(env.BROWSER);
+      let closed = false;
+      const close = async () => {
+        if (closed) return;
+        closed = true;
+        await browser.close().catch(() => {});
+      };
+      const onAbort = () => {
+        void close();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        const page = await browser.newPage();
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
+        return await page.content();
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+        await close();
+      }
+    }
+  };
+}
 
 const PREAMBLE =
   "You are a concise playground assistant. You have a durable workspace at /workspace: read, write, edit, delete, list (ls), find and grep files there, and run JavaScript modules in it with exec, which can also use git. Paths are absolute. Use tools whenever they can answer the request, and explain their results plainly.";
@@ -49,8 +80,13 @@ export class PiAgent extends DurableObject<Env> {
         sections: [{ key: "preamble", render: () => PREAMBLE, tag: false }],
         tools: createWorkspaceTools(this.workspace)
       });
-      // Web search: SearXNG when SEARXNG_URL is set, DuckDuckGo otherwise.
-      this.registry.install(createWebSearchExtension(this.env.SEARXNG_URL));
+      // Web search: SearXNG when configured, then a real browser, then
+      // DuckDuckGo's HTML and Lite endpoints.
+      this.registry.install(
+        createWebSearchExtension(this.env.SEARXNG_URL, {
+          browser: createBrowserRunner(this.env)
+        })
+      );
       const models = createModels();
       models.setProvider(this.ai.provider);
       return Harness.open(
