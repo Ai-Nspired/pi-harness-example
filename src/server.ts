@@ -10,6 +10,7 @@ import { PiHarness } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
+import { createWebSearchExtension } from "./extensions/web-search";
 import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
@@ -48,6 +49,10 @@ export class PiAgent extends DurableObject<Env> {
         sections: [{ key: "preamble", render: () => PREAMBLE, tag: false }],
         tools: createWorkspaceTools(this.workspace)
       });
+      // Optional web search: a native pi-durable extension, installed only
+      // when SEARXNG_URL names an instance with the JSON format enabled.
+      const webSearch = createWebSearchExtension(this.env.SEARXNG_URL);
+      if (webSearch) this.registry.install(webSearch);
       const models = createModels();
       models.setProvider(this.ai.provider);
       return Harness.open(

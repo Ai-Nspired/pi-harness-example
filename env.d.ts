@@ -3,6 +3,7 @@
 interface __BaseEnv_Env {
   LOADER: WorkerLoader;
   AI: Ai;
+  SEARXNG_URL: string;
   PiAgent: DurableObjectNamespace<import("./src/server").PiAgent>;
 }
 declare namespace Cloudflare {

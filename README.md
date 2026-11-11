@@ -39,6 +39,11 @@ pnpm install
 pnpm run start
 ```
 
+`pnpm-lock.yaml` pins `agents` to the 0.32 series, the newest release whose
+peer dependencies still match the pinned pi 1.4.0 packages. Install with
+`pnpm install --frozen-lockfile` (CI, or when you want exactly this tree) and
+bump `agents` together with pi, not before.
+
 The example uses the remote Workers AI binding and may incur Workers AI
 usage. It needs no API key. If your Wrangler login has access to more than
 one account, set `CLOUDFLARE_ACCOUNT_ID` when starting.
@@ -52,6 +57,7 @@ before a tool was added never sees it; start a new session instead.
 - `Write a haiku about Durable Objects to /workspace/haiku.txt, then read it back.`
 - `Use exec to run JavaScript that lists /workspace and returns the size of each file.`
 - `Clone https://github.com/octocat/Hello-World into /workspace/hello, then show its git log.`
+- With `SEARXNG_URL` set: `Search the web for the current Workers AI pricing and cite the URLs.`
 - While a turn runs, type and press Enter to queue a follow-up, or Steer to
   join the running turn.
 
@@ -192,6 +198,31 @@ Git needs two things besides the backend: `git: createGitClient()` from
 `createGitModule({ allowNetwork: true })` (`@cloudflare/computer/modules/git`)
 on the backend, which `clone` needs. Git runs in the host, through isomorphic-git on the workspace
 files, so cloning works while the module itself has no network.
+
+## Web search
+
+`src/extensions/web-search.ts` adds a `web_search` tool backed by
+[SearXNG](https://docs.searxng.org/), as a native pi-durable extension: a
+`ToolRegistration` plus a prompt section, installed on the same registry as
+the workspace tools. It is a port of the idea behind `pi-lean-search`, not
+the package itself — that one targets the pi coding agent's `ExtensionAPI`
+and TUI, which a Durable Object does not have.
+
+Configure it with `SEARXNG_URL` in `wrangler.jsonc` (or `.dev.vars` for
+local runs), for a self-hosted or public instance whose `settings.yml` lists
+`json` in `search.formats`:
+
+```jsonc
+"vars": { "SEARXNG_URL": "https://searx.example.com" }
+```
+
+It is optional: with `SEARXNG_URL` empty the tool is not installed at all, so
+the model is never offered a search it cannot run. `language` and
+`safeSearch` default to the instance's own settings; the tool takes `query`,
+`maxResults` (1–10), `category` (`general` or `news`) and `timeRange`
+(`day`, `week`, `month`, `year`). Searches are replay-safe and time out after
+10 seconds. Because pi fixes a session's tools at creation, start a new
+session after changing the variable.
 
 ## Package sources
 
