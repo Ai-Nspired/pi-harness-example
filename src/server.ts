@@ -49,10 +49,8 @@ export class PiAgent extends DurableObject<Env> {
         sections: [{ key: "preamble", render: () => PREAMBLE, tag: false }],
         tools: createWorkspaceTools(this.workspace)
       });
-      // Optional web search: a native pi-durable extension, installed only
-      // when SEARXNG_URL names an instance with the JSON format enabled.
-      const webSearch = createWebSearchExtension(this.env.SEARXNG_URL);
-      if (webSearch) this.registry.install(webSearch);
+      // Web search: SearXNG when SEARXNG_URL is set, DuckDuckGo otherwise.
+      this.registry.install(createWebSearchExtension(this.env.SEARXNG_URL));
       const models = createModels();
       models.setProvider(this.ai.provider);
       return Harness.open(

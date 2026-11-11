@@ -5,8 +5,8 @@
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "ai": { "binding": "AI", "remote": true },
-  // Optional web search: point this at a SearXNG instance whose settings.yml
-  // lists "json" in `search.formats`. Empty leaves the tool out entirely.
+  // Optional: prefer a SearXNG instance with "json" in `search.formats`.
+  // Empty searches through DuckDuckGo instead.
   "vars": { "SEARXNG_URL": "" },
   // `exec` runs JavaScript in Dynamic Workers minted through this.
   "worker_loaders": [{ "binding": "LOADER" }],

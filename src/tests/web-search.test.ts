@@ -10,7 +10,7 @@ type ToolResult = {
 
 /** Run the extension's only tool the way pi would. */
 function run(
-  extension: NonNullable<ReturnType<typeof createWebSearchExtension>>,
+  extension: ReturnType<typeof createWebSearchExtension>,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const tool = extension.tools?.[0];
@@ -30,91 +30,124 @@ const jsonResponse = (body: unknown): Response =>
     headers: { "content-type": "application/json" }
   });
 
+/** Two result blocks in DuckDuckGo's markup, with its redirector links. */
+const DDG_HTML = `
+<div class="result results_links results_links_deep web-result ">
+  <div class="links_main links_deep result__body">
+    <h2 class="result__title">
+      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdevelopers.cloudflare.com%2Fdurable%2Dobjects%2F&amp;rut=abc">Durable Objects &amp; limits</a>
+    </h2>
+    <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdevelopers.cloudflare.com%2Fdurable%2Dobjects%2F&amp;rut=abc">Account and storage <b>limits</b> for Durable Objects.</a>
+  </div>
+</div>
+<div class="result results_links results_links_deep web-result ">
+  <div class="links_main links_deep result__body">
+    <h2 class="result__title">
+      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fsecond&amp;rut=def">Second result</a>
+    </h2>
+    <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fsecond&amp;rut=def">Another page.</a>
+  </div>
+</div>`;
+
 describe("the web search extension", () => {
-  it("is left out when no instance is configured", () => {
-    expect(createWebSearchExtension(undefined)).toBeNull();
-    expect(createWebSearchExtension("   ")).toBeNull();
+  it("is installed with no configuration, searching DuckDuckGo", async () => {
+    const requests: string[] = [];
+    const extension = createWebSearchExtension(undefined, {
+      fetch: async (input) => {
+        requests.push(String(input));
+        return new Response(DDG_HTML, { headers: { "content-type": "text/html" } });
+      }
+    });
+
+    const result = await run(extension, { query: "durable objects" });
+
+    expect(result.isError).toBeFalsy();
+    expect(requests[0]).toContain("html.duckduckgo.com");
+    expect(text(result)).toContain("1. Durable Objects & limits");
+    expect(text(result)).toContain("https://developers.cloudflare.com/durable-objects/");
   });
 
-  it("asks SearXNG for JSON with the model's filters", async () => {
-    const requests: URL[] = [];
+  it("parses DuckDuckGo titles, redirects and snippets, honouring maxResults", async () => {
+    const extension = createWebSearchExtension(undefined, {
+      fetch: async () =>
+        new Response(DDG_HTML, { headers: { "content-type": "text/html" } })
+    });
+
+    const body = text(await run(extension, { query: "durable objects", maxResults: 1 }));
+
+    expect(body).toContain("Results for \"durable objects\":");
+    expect(body).toContain("Account and storage limits for Durable Objects.");
+    expect(body).toContain("1. Durable Objects & limits");
+    expect(body).not.toContain("Second result");
+  });
+
+  it("prefers SearXNG when an instance is configured", async () => {
+    const requests: string[] = [];
     const extension = createWebSearchExtension("https://searx.example/", {
       language: "en",
       safeSearch: 1,
       fetch: async (input) => {
-        requests.push(new URL(String(input)));
-        return jsonResponse({ results: [] });
+        requests.push(String(input));
+        return jsonResponse({
+          results: [{ title: "From SearXNG", url: "https://a.example", content: "one" }]
+        });
       }
     });
-    expect(extension).not.toBeNull();
 
-    await run(extension!, {
-      query: "durable objects",
-      category: "news",
-      timeRange: "week"
-    });
+    const body = text(await run(extension, { query: "example" }));
 
     expect(requests).toHaveLength(1);
-    const [url] = requests;
-    expect(url.origin).toBe("https://searx.example");
-    expect(url.pathname).toBe("/search");
-    expect(url.searchParams.get("q")).toBe("durable objects");
-    expect(url.searchParams.get("format")).toBe("json");
-    expect(url.searchParams.get("categories")).toBe("news");
-    expect(url.searchParams.get("time_range")).toBe("week");
-    expect(url.searchParams.get("language")).toBe("en");
-    expect(url.searchParams.get("safesearch")).toBe("1");
+    expect(requests[0]).toContain("searx.example/search");
+    expect(requests[0]).toContain("format=json");
+    expect(body).toContain("From SearXNG");
   });
 
-  it("returns numbered results and honours maxResults", async () => {
+  it("falls back to DuckDuckGo when the SearXNG instance fails", async () => {
+    const requests: string[] = [];
     const extension = createWebSearchExtension("https://searx.example", {
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("searx.example")) {
+          return new Response("Format not allowed", { status: 403 });
+        }
+        return new Response(DDG_HTML, { headers: { "content-type": "text/html" } });
+      }
+    });
+
+    const result = await run(extension, { query: "durable objects" });
+
+    expect(result.isError).toBeFalsy();
+    expect(requests).toHaveLength(2);
+    expect(text(result)).toContain("Durable Objects & limits");
+  });
+
+  it("reports every backend when all of them fail", async () => {
+    const extension = createWebSearchExtension("https://searx.example", {
+      fetch: async (input) =>
+        String(input).includes("searx.example")
+          ? new Response("Format not allowed", { status: 403 })
+          : new Response("busy", { status: 503 })
+    });
+
+    const result = await run(extension, { query: "anything" });
+
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("searxng:");
+    expect(text(result)).toContain("duckduckgo:");
+    expect(text(result)).toContain("search.formats");
+  });
+
+  it("says so when a backend legitimately finds nothing", async () => {
+    const extension = createWebSearchExtension(undefined, {
       fetch: async () =>
-        jsonResponse({
-          results: [
-            { title: "First", url: "https://a.example", content: "  one\n two " },
-            { title: "Second", url: "https://b.example", content: "three" },
-            { title: "Third", url: "https://c.example", content: "four" }
-          ]
+        new Response("<html><body>No results found</body></html>", {
+          headers: { "content-type": "text/html" }
         })
     });
 
-    const result = await run(extension!, { query: "example", maxResults: 2 });
-    const body = text(result as never);
+    const result = await run(extension, { query: "nothing at all" });
 
-    expect(body).toContain("Results for \"example\":");
-    expect(body).toContain("1. First");
-    expect(body).toContain("https://a.example");
-    expect(body).toContain("one two");
-    expect(body).toContain("2. Second");
-    expect(body).not.toContain("Third");
-  });
-
-  it("explains how to fix an instance without the JSON format", async () => {
-    const extension = createWebSearchExtension("https://searx.example", {
-      fetch: async () => new Response("Format not allowed", { status: 403 })
-    });
-
-    const result = (await run(extension!, { query: "anything" })) as {
-      isError?: boolean;
-    };
-
-    expect(result.isError).toBe(true);
-    expect(text(result as never)).toContain("403");
-    expect(text(result as never)).toContain("search.formats");
-  });
-
-  it("reports an unreachable instance instead of throwing", async () => {
-    const extension = createWebSearchExtension("https://searx.example", {
-      fetch: async () => {
-        throw new TypeError("network down");
-      }
-    });
-
-    const result = (await run(extension!, { query: "anything" })) as {
-      isError?: boolean;
-    };
-
-    expect(result.isError).toBe(true);
-    expect(text(result as never)).toContain("network down");
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toContain("No results for \"nothing at all\"");
   });
 });

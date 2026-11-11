@@ -1,7 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 
-/** How long one search may take before it reports a timeout. */
+/** How long one backend may take before the next one is tried. */
 const DEFAULT_TIMEOUT_MS = 10_000;
 /** Results returned when the model does not ask for a count. */
 const DEFAULT_RESULTS = 5;
@@ -10,10 +10,13 @@ const MAX_RESULTS = 10;
 /** Each snippet is cut to this many characters. */
 const SNIPPET_CHARS = 400;
 
+const USER_AGENT =
+  "Mozilla/5.0 (compatible; pi-harness-example/0.1; +https://developers.cloudflare.com/agents/)";
+
 const DEFAULT_SECTION =
-  "You can search the web with the web_search tool, a SearXNG metasearch instance. " +
-  "Use it for current facts, releases, prices, documentation and news; prefer primary " +
-  "sources, and say plainly when a result looks stale. It returns titles, URLs and short " +
+  "You can search the web with the web_search tool. Use it for current facts, " +
+  "releases, prices, documentation and news; prefer primary sources, and say " +
+  "plainly when a result looks stale. It returns titles, URLs and short " +
   "snippets, not page contents.";
 
 export interface WebSearchOptions {
@@ -23,7 +26,7 @@ export interface WebSearchOptions {
   safeSearch?: 0 | 1 | 2;
   /** Results returned when the model does not pass `maxResults`. */
   defaultResults?: number;
-  /** Deadline for one search, in milliseconds. */
+  /** Deadline for one backend, in milliseconds. */
   timeoutMs?: number;
   /** Replaced in tests; defaults to the global `fetch`. */
   fetch?: typeof fetch;
@@ -56,7 +59,7 @@ const SearchParameters = Type.Object({
         Type.Literal("month"),
         Type.Literal("year")
       ],
-      { description: "Only results published within this window." }
+      { description: "Only results published within this window (SearXNG)." }
     )
   )
 });
@@ -65,6 +68,34 @@ type TextResult = {
   output: { type: "text"; text: string }[];
   isError?: boolean;
 };
+
+interface SearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+interface SearchOutcome {
+  hits: SearchHit[];
+  answers: string[];
+  suggestions: string[];
+  unavailable: string[];
+}
+
+interface SearchFilters {
+  category?: "general" | "news";
+  timeRange?: "day" | "week" | "month" | "year";
+}
+
+interface Provider {
+  name: string;
+  search(
+    query: string,
+    limit: number,
+    signal: AbortSignal,
+    filters: SearchFilters
+  ): Promise<SearchOutcome>;
+}
 
 interface SearxngResult {
   title?: unknown;
@@ -95,161 +126,283 @@ function normalizeInstance(instanceUrl: string | undefined): string | null {
   return trimmed.replace(/\/search$/i, "");
 }
 
-function oneLine(value: unknown, limit: number): string {
-  if (typeof value !== "string") return "";
-  const collapsed = value.replace(/\s+/g, " ").trim();
-  return collapsed.length > limit ? `${collapsed.slice(0, limit - 1)}…` : collapsed;
+function collapse(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
-function formatSnippets(query: string, payload: SearxngResponse, limit: number): string {
+function oneLine(value: unknown, limit: number): string {
+  if (typeof value !== "string") return "";
+  const text = collapse(value);
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  hellip: "…",
+  mdash: "—",
+  ndash: "–"
+};
+
+function decodeEntities(value: string): string {
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
+    if (entity.startsWith("#x") || entity.startsWith("#X")) {
+      const code = Number.parseInt(entity.slice(2), 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+    }
+    if (entity.startsWith("#")) {
+      const code = Number.parseInt(entity.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+    }
+    return ENTITIES[entity.toLowerCase()] ?? match;
+  });
+}
+
+/** Visible text of an HTML fragment: tags dropped, entities decoded. */
+function textOf(html: string): string {
+  return collapse(decodeEntities(html.replace(/<[^>]*>/g, " ")));
+}
+
+function hrefOf(attributes: string): string {
+  const match = /\bhref\s*=\s*("([^"]*)"|'([^']*)')/i.exec(attributes);
+  return match ? (match[2] ?? match[3] ?? "") : "";
+}
+
+/** DuckDuckGo links point at its redirector; take the real destination. */
+function unwrapDuckDuckGo(href: string): string {
+  const decoded = decodeEntities(href);
+  const absolute = decoded.startsWith("//") ? `https:${decoded}` : decoded;
+  try {
+    const url = new URL(absolute, "https://duckduckgo.com");
+    const target = url.searchParams.get("uddg");
+    if (url.hostname.endsWith("duckduckgo.com") && target) return target;
+    return url.toString();
+  } catch {
+    return absolute;
+  }
+}
+
+/** The result blocks of DuckDuckGo's HTML endpoint. */
+function parseDuckDuckGo(html: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  const blocks = html.split(/<div class="result results_links/).slice(1);
+  for (const block of blocks) {
+    const link = /<a\b([^>]*\bresult__a\b[^>]*)>([\s\S]*?)<\/a>/i.exec(block);
+    if (!link) continue;
+    const url = unwrapDuckDuckGo(hrefOf(link[1]));
+    if (!url) continue;
+    const snippet = /<a\b[^>]*\bresult__snippet\b[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    hits.push({
+      title: textOf(link[2]).slice(0, 200) || url,
+      url: url.slice(0, 500),
+      snippet: snippet ? textOf(snippet[1]).slice(0, SNIPPET_CHARS) : ""
+    });
+  }
+  return hits;
+}
+
+/** SearXNG through `format=json`, which the instance must enable. */
+function createSearxngProvider(
+  base: string,
+  options: WebSearchOptions,
+  doFetch: typeof fetch
+): Provider {
+  return {
+    name: "searxng",
+    async search(query, limit, signal, filters) {
+      let endpoint: URL;
+      try {
+        endpoint = new URL("search", `${base}/`);
+      } catch {
+        throw new Error(`SEARXNG_URL "${base}" is not a valid URL`);
+      }
+      endpoint.searchParams.set("q", query);
+      endpoint.searchParams.set("format", "json");
+      if (filters.category) endpoint.searchParams.set("categories", filters.category);
+      if (filters.timeRange) endpoint.searchParams.set("time_range", filters.timeRange);
+      if (options.language) endpoint.searchParams.set("language", options.language);
+      if (options.safeSearch !== undefined) {
+        endpoint.searchParams.set("safesearch", String(options.safeSearch));
+      }
+
+      const response = await doFetch(endpoint, {
+        signal,
+        headers: { accept: "application/json", "user-agent": USER_AGENT }
+      });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!response.ok || !contentType.includes("application/json")) {
+        const body = oneLine(await response.text().catch(() => ""), 200);
+        const hint =
+          response.status === 400 ||
+          response.status === 403 ||
+          /json/i.test(body)
+            ? ' SearXNG serves this API only when its JSON format is enabled: add "json" to search.formats in settings.yml.'
+            : "";
+        throw new Error(
+          `SearXNG at ${endpoint.origin} returned ${response.status}${
+            contentType ? ` (${contentType})` : ""
+          }.${hint}${body ? ` ${body}` : ""}`
+        );
+      }
+
+      const payload = (await response.json()) as SearxngResponse;
+      const answers = Array.isArray(payload.answers)
+        ? payload.answers.filter((answer): answer is string => typeof answer === "string")
+        : [];
+      const suggestions = Array.isArray(payload.suggestions)
+        ? payload.suggestions.filter(
+            (suggestion): suggestion is string => typeof suggestion === "string"
+          )
+        : [];
+      const unavailable = Array.isArray(payload.unresponsive_engines)
+        ? payload.unresponsive_engines
+            .map((engine) => (Array.isArray(engine) ? engine[0] : engine))
+            .filter((engine): engine is string => typeof engine === "string")
+        : [];
+      const hits = (Array.isArray(payload.results) ? payload.results : []).flatMap(
+        (result) => {
+          const url = oneLine(result?.url, 500);
+          if (!url) return [];
+          return [
+            {
+              title: oneLine(result?.title, 200) || url,
+              url,
+              snippet: oneLine(result?.content, SNIPPET_CHARS)
+            }
+          ];
+        }
+      );
+
+      return { hits: hits.slice(0, limit), answers, suggestions, unavailable };
+    }
+  };
+}
+
+/** DuckDuckGo's HTML endpoint: no key, no instance, best effort. */
+function createDuckDuckGoProvider(doFetch: typeof fetch): Provider {
+  return {
+    name: "duckduckgo",
+    async search(query, limit, signal) {
+      const endpoint = new URL("https://html.duckduckgo.com/html/");
+      endpoint.searchParams.set("q", query);
+      const response = await doFetch(endpoint, {
+        signal,
+        headers: { accept: "text/html", "user-agent": USER_AGENT }
+      });
+      if (!response.ok) {
+        throw new Error(`DuckDuckGo returned ${response.status}`);
+      }
+      const html = await response.text();
+      const hits = parseDuckDuckGo(html).slice(0, limit);
+      if (hits.length === 0 && /anomaly|unusual traffic|challenge/i.test(html)) {
+        throw new Error(
+          "DuckDuckGo served a bot challenge instead of results; retry later or set SEARXNG_URL"
+        );
+      }
+      return { hits, answers: [], suggestions: [], unavailable: [] };
+    }
+  };
+}
+
+function formatOutcome(query: string, outcome: SearchOutcome, limit: number): string {
   const lines: string[] = [];
 
-  const answers = Array.isArray(payload.answers)
-    ? payload.answers.filter((answer): answer is string => typeof answer === "string")
-    : [];
-  if (answers.length > 0) {
-    lines.push(`Answer: ${answers.map((answer) => oneLine(answer, 600)).join(" ")}`, "");
+  if (outcome.answers.length > 0) {
+    lines.push(
+      `Answer: ${outcome.answers.map((answer) => oneLine(answer, 600)).join(" ")}`,
+      ""
+    );
   }
 
-  const results = Array.isArray(payload.results) ? payload.results : [];
-  const usable = results.flatMap((result) => {
-    const url = oneLine(result?.url, 500);
-    if (!url) return [];
-    return [
-      {
-        title: oneLine(result?.title, 200) || url,
-        url,
-        snippet: oneLine(result?.content, SNIPPET_CHARS)
-      }
-    ];
-  });
-
-  if (usable.length === 0) {
-    const unavailable = Array.isArray(payload.unresponsive_engines)
-      ? payload.unresponsive_engines
-          .map((engine) => (Array.isArray(engine) ? engine[0] : engine))
-          .filter((engine): engine is string => typeof engine === "string")
-      : [];
+  if (outcome.hits.length === 0) {
     lines.push(
       `No results for "${query}"${
-        unavailable.length > 0
-          ? ` (engines unavailable: ${unavailable.join(", ")})`
+        outcome.unavailable.length > 0
+          ? ` (engines unavailable: ${outcome.unavailable.join(", ")})`
           : ""
       }.`
     );
-    const suggestions = Array.isArray(payload.suggestions)
-      ? payload.suggestions.filter(
-          (suggestion): suggestion is string => typeof suggestion === "string"
-        )
-      : [];
-    if (suggestions.length > 0) {
-      lines.push(`Try instead: ${suggestions.join(", ")}`);
+    if (outcome.suggestions.length > 0) {
+      lines.push(`Try instead: ${outcome.suggestions.join(", ")}`);
     }
     return lines.join("\n");
   }
 
   lines.push(`Results for "${query}":`);
-  for (const [index, result] of usable.slice(0, limit).entries()) {
-    lines.push(`${index + 1}. ${result.title}`, `   ${result.url}`);
-    if (result.snippet) lines.push(`   ${result.snippet}`);
+  for (const [index, hit] of outcome.hits.slice(0, limit).entries()) {
+    lines.push(`${index + 1}. ${hit.title}`, `   ${hit.url}`);
+    if (hit.snippet) lines.push(`   ${hit.snippet}`);
   }
   lines.push("", "These are search snippets; open a source before relying on it.");
   return lines.join("\n");
 }
 
 /**
- * Web search through a SearXNG instance, as a native pi-durable extension.
- *
- * Returns `null` when no instance URL is configured, so the app can install
- * it only when `SEARXNG_URL` is set. The tool is replay-safe: a search has no
- * side effects, so pi may run it again after an eviction interrupted it.
+ * Web search as a native pi-durable extension: SearXNG when an instance URL
+ * is configured, DuckDuckGo's HTML endpoint otherwise, and DuckDuckGo as the
+ * fallback when the SearXNG instance errors. The tool is replay-safe: a
+ * search has no side effects, so pi may run it again after an eviction
+ * interrupted it.
  */
 export function createWebSearchExtension(
   instanceUrl: string | undefined,
   options: WebSearchOptions = {}
-): Extension | null {
+): Extension {
   const base = normalizeInstance(instanceUrl);
-  if (base === null) return null;
+  const doFetch = options.fetch ?? fetch;
+  const providers: Provider[] = [];
+  if (base !== null) {
+    providers.push(createSearxngProvider(base, options, doFetch));
+  }
+  providers.push(createDuckDuckGoProvider(doFetch));
 
   const defaultResults = Math.min(
     Math.max(options.defaultResults ?? DEFAULT_RESULTS, 1),
     MAX_RESULTS
   );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const doFetch = options.fetch ?? fetch;
 
   const webSearch: ToolRegistration<typeof SearchParameters> = {
     name: "web_search",
     description:
-      "Search the web with SearXNG. Returns a numbered list of titles, URLs and short " +
-      "snippets, plus short answers when the engines provide one.",
+      "Search the web. Returns a numbered list of titles, URLs and short snippets, " +
+      "plus short answers when the backend provides one.",
     parameters: SearchParameters,
     replay: "safe",
     async execute({ query, maxResults, category, timeRange }, _api, context) {
-      const limit = Math.min(
-        Math.max(maxResults ?? defaultResults, 1),
-        MAX_RESULTS
-      );
+      const limit = Math.min(Math.max(maxResults ?? defaultResults, 1), MAX_RESULTS);
 
-      let endpoint: URL;
-      try {
-        endpoint = new URL("search", `${base}/`);
-      } catch {
-        return errorResult(
-          `web_search is misconfigured: SEARXNG_URL "${base}" is not a valid URL.`
-        );
-      }
-      endpoint.searchParams.set("q", query);
-      endpoint.searchParams.set("format", "json");
-      if (category) endpoint.searchParams.set("categories", category);
-      if (timeRange) endpoint.searchParams.set("time_range", timeRange);
-      if (options.language) endpoint.searchParams.set("language", options.language);
-      if (options.safeSearch !== undefined) {
-        endpoint.searchParams.set("safesearch", String(options.safeSearch));
-      }
-
-      const signal = context.abortSignal
-        ? AbortSignal.any([context.abortSignal, AbortSignal.timeout(timeoutMs)])
-        : AbortSignal.timeout(timeoutMs);
-
-      let payload: SearxngResponse;
-      try {
-        const response = await doFetch(endpoint, {
-          signal,
-          headers: {
-            accept: "application/json",
-            "user-agent": "pi-harness-example (+https://developers.cloudflare.com/agents/)"
-          }
-        });
-        const contentType = response.headers.get("content-type") ?? "";
-        if (!response.ok || !contentType.includes("application/json")) {
-          const body = oneLine(await response.text().catch(() => ""), 200);
-          const hint =
-            response.status === 400 ||
-            response.status === 403 ||
-            /json/i.test(body)
-              ? ' SearXNG serves this API only when its JSON format is enabled: add "json" to search.formats in settings.yml.'
-              : "";
-          return errorResult(
-            `SearXNG at ${endpoint.origin} returned ${response.status}${
-              contentType ? ` (${contentType})` : ""
-            }.${hint}${body ? ` ${body}` : ""}`
+      const errors: string[] = [];
+      for (const provider of providers) {
+        const timeout = AbortSignal.timeout(timeoutMs);
+        const signal = context.abortSignal
+          ? AbortSignal.any([context.abortSignal, timeout])
+          : timeout;
+        try {
+          const outcome = await provider.search(query, limit, signal, {
+            category,
+            timeRange
+          });
+          return textResult(formatOutcome(query, outcome, limit));
+        } catch (error) {
+          if (context.abortSignal?.aborted) throw error;
+          errors.push(
+            `${provider.name}: ${
+              error instanceof Error && error.name === "TimeoutError"
+                ? `did not answer within ${timeoutMs} ms`
+                : error instanceof Error
+                  ? error.message
+                  : String(error)
+            }`
           );
         }
-        payload = (await response.json()) as SearxngResponse;
-      } catch (error) {
-        if (context.abortSignal?.aborted) throw error;
-        if (error instanceof Error && error.name === "TimeoutError") {
-          return errorResult(
-            `SearXNG at ${endpoint.origin} did not answer within ${timeoutMs} ms.`
-          );
-        }
-        return errorResult(
-          `web search failed: ${error instanceof Error ? error.message : String(error)}`
-        );
       }
 
-      return textResult(formatSnippets(query, payload, limit));
+      return errorResult(`web search failed. ${errors.join(" ")}`);
     }
   };
 

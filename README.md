@@ -57,7 +57,7 @@ before a tool was added never sees it; start a new session instead.
 - `Write a haiku about Durable Objects to /workspace/haiku.txt, then read it back.`
 - `Use exec to run JavaScript that lists /workspace and returns the size of each file.`
 - `Clone https://github.com/octocat/Hello-World into /workspace/hello, then show its git log.`
-- With `SEARXNG_URL` set: `Search the web for the current Workers AI pricing and cite the URLs.`
+- `Search the web for the current Workers AI pricing and cite the URLs.`
 - While a turn runs, type and press Enter to queue a follow-up, or Steer to
   join the running turn.
 
@@ -216,18 +216,23 @@ local runs), for a self-hosted or public instance whose `settings.yml` lists
 "vars": { "SEARXNG_URL": "https://searx.example.com" }
 ```
 
-It is optional: with `SEARXNG_URL` empty the tool is not installed at all, so
-the model is never offered a search it cannot run. `language` and
-`safeSearch` default to the instance's own settings; the tool takes `query`,
+It works with no configuration: with `SEARXNG_URL` empty the tool searches
+through DuckDuckGo's HTML endpoint, which needs no key and no instance. When
+`SEARXNG_URL` is set, SearXNG is tried first and DuckDuckGo is the fallback
+if that instance errors, so one broken backend does not take search away.
+SearXNG also honours `language` and `safeSearch`, and the tool takes `query`,
 `maxResults` (1–10), `category` (`general` or `news`) and `timeRange`
-(`day`, `week`, `month`, `year`). Searches are replay-safe and time out after
-10 seconds. Because pi fixes a session's tools at creation, start a new
-session after changing the variable.
+(`day`, `week`, `month`, `year`) where the backend supports them. Searches
+are replay-safe and time out after 10 seconds per backend. Because pi fixes a
+session's tools at creation, start a new session after changing the variable.
 
 ### Running an instance
 
-Public instances almost all leave the JSON API off, so `SEARXNG_URL` needs an
-instance you control. `searxng/` has a one-command one:
+DuckDuckGo works with no setup, but it is a scraped HTML endpoint: it can
+rate-limit a busy Worker, and a SearXNG instance is more stable and gives you
+the engine list you choose. Public instances almost all leave the JSON API
+off, so `SEARXNG_URL` needs an instance you control. `searxng/` has a
+one-command one:
 
 ```sh
 cd searxng && docker compose up -d
