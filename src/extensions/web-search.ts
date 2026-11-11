@@ -249,6 +249,92 @@ function parseDuckDuckGoLite(html: string): SearchHit[] {
   return hits;
 }
 
+/** Bing wants a browser-shaped request; its HTML is what we parse. */
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+function bingUrl(query: string, limit: number): string {
+  const url = new URL("https://www.bing.com/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("setlang", "en-us");
+  url.searchParams.set("cc", "us");
+  url.searchParams.set("count", String(limit));
+  return url.toString();
+}
+
+/** Bing wraps results in /ck/a redirects whose `u` parameter is base64url. */
+function unwrapBing(href: string): string {
+  const decoded = decodeEntities(href);
+  const absolute = decoded.startsWith("//") ? `https:${decoded}` : decoded;
+  try {
+    const url = new URL(absolute, "https://www.bing.com");
+    if (url.hostname.endsWith("bing.com") && url.pathname.startsWith("/ck/a")) {
+      const target = url.searchParams.get("u");
+      if (target?.startsWith("a1")) {
+        const base64 = target.slice(2).replace(/-/g, "+").replace(/_/g, "/");
+        const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+        try {
+          return atob(padded);
+        } catch {
+          // keep the redirect link when it will not decode
+        }
+      }
+    }
+    return url.toString();
+  } catch {
+    return absolute;
+  }
+}
+
+/** Bing's organic results, one per `li.b_algo`. */
+function parseBing(html: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  const blocks = html.split(/<li class="b_algo/).slice(1);
+  for (const block of blocks) {
+    const heading = /<h2\b[^>]*>([\s\S]*?)<\/h2>/i.exec(block);
+    if (!heading) continue;
+    const link = /<a\b([^>]*)>([\s\S]*?)<\/a>/i.exec(heading[1]);
+    if (!link) continue;
+    const url = unwrapBing(hrefOf(link[1]));
+    if (!url) continue;
+    const snippet = /<p\b[^>]*>([\s\S]*?)<\/p>/i.exec(block);
+    hits.push({
+      title: textOf(link[2]).slice(0, 200) || url,
+      url: url.slice(0, 500),
+      snippet: snippet ? textOf(snippet[1]).slice(0, SNIPPET_CHARS) : ""
+    });
+  }
+  return hits;
+}
+
+/** Bing's HTML endpoint: keyless, and not blocked from Worker egress. */
+function createBingProvider(doFetch: typeof fetch): Provider {
+  return {
+    name: "bing",
+    async search(query, limit, signal) {
+      const response = await doFetch(bingUrl(query, limit), {
+        signal,
+        headers: {
+          accept: "text/html,application/xhtml+xml",
+          "accept-language": "en-US,en;q=0.9",
+          "user-agent": BROWSER_UA
+        }
+      });
+      if (!response.ok) throw new Error(`Bing returned ${response.status}`);
+      const html = await response.text();
+      const hits = parseBing(html).slice(0, limit);
+      if (hits.length === 0) {
+        throw new Error(
+          /captcha|unusual traffic|verify you are human/i.test(html)
+            ? "Bing served a challenge instead of results"
+            : "Bing returned no parseable results"
+        );
+      }
+      return { hits, answers: [], suggestions: [], unavailable: [] };
+    }
+  };
+}
+
 /** SearXNG through `format=json`, which the instance must enable. */
 function createSearxngProvider(
   base: string,
@@ -376,15 +462,18 @@ function createDuckDuckGoLiteProvider(doFetch: typeof fetch): Provider {
   };
 }
 
-/** DuckDuckGo through a real Chromium, which passes what Worker fetches cannot. */
-function createBrowserProvider(runner: BrowserRunner): Provider {
+/** Any engine through a real Chromium, for pages that block Worker fetches. */
+function createBrowserProvider(
+  runner: BrowserRunner,
+  name: string,
+  target: (query: string, limit: number) => string,
+  parse: (html: string) => SearchHit[]
+): Provider {
   return {
-    name: "browser",
+    name,
     async search(query, limit, signal) {
-      const endpoint = new URL("https://html.duckduckgo.com/html/");
-      endpoint.searchParams.set("q", query);
-      const html = await runner.html(endpoint.toString(), signal);
-      const hits = parseDuckDuckGo(html).slice(0, limit);
+      const html = await runner.html(target(query, limit), signal);
+      const hits = parse(html).slice(0, limit);
       if (hits.length === 0) {
         throw new Error("the browser page had no parseable results");
       }
@@ -427,11 +516,11 @@ function formatOutcome(query: string, outcome: SearchOutcome, limit: number): st
 }
 
 /**
- * Web search as a native pi-durable extension: SearXNG when an instance URL
- * is configured, DuckDuckGo's HTML endpoint otherwise, and DuckDuckGo as the
- * fallback when the SearXNG instance errors. The tool is replay-safe: a
- * search has no side effects, so pi may run it again after an eviction
- * interrupted it.
+ * Web search as a native pi-durable extension. Backends, in order: SearXNG
+ * when an instance URL is configured, Bing over HTTP, Bing through a real
+ * browser, then DuckDuckGo's HTML and Lite endpoints. DuckDuckGo blocks
+ * Cloudflare egress, so it is last. The tool is replay-safe: a search has no
+ * side effects, so pi may run it again after an eviction interrupted it.
  */
 export function createWebSearchExtension(
   instanceUrl: string | undefined,
@@ -443,8 +532,11 @@ export function createWebSearchExtension(
   if (base !== null) {
     providers.push(createSearxngProvider(base, options, doFetch));
   }
+  providers.push(createBingProvider(doFetch));
   if (options.browser) {
-    providers.push(createBrowserProvider(options.browser));
+    providers.push(
+      createBrowserProvider(options.browser, "bing-browser", bingUrl, parseBing)
+    );
   }
   providers.push(createDuckDuckGoProvider(doFetch));
   providers.push(createDuckDuckGoLiteProvider(doFetch));

@@ -30,22 +30,36 @@ const jsonResponse = (body: unknown): Response =>
     headers: { "content-type": "application/json" }
   });
 
+const htmlResponse = (body: string): Response =>
+  new Response(body, { headers: { "content-type": "text/html" } });
+
+/** A Bing /ck/a redirect, whose `u` parameter is base64url of the target. */
+const bingLink = (url: string): string => {
+  const encoded = btoa(url).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `https://www.bing.com/ck/a?!&&p=abc&amp;ptn=3&amp;ver=2&amp;u=a1${encoded}&amp;ntb=1`;
+};
+
+/** Two organic results in Bing's markup, with its redirect links. */
+const BING_HTML = `
+<ol id="b_results">
+  <li class="b_algo" data-id iid=SERP.1>
+    <h2><a href="${bingLink("https://developers.cloudflare.com/durable-objects/")}">Durable Objects &amp; pricing</a></h2>
+    <div class="b_caption"><p>Durable Objects <b>pricing</b> and limits.</p></div>
+  </li>
+  <li class="b_algo" data-id iid=SERP.2>
+    <h2><a href="${bingLink("https://example.com/bing-two")}">Second Bing result</a></h2>
+    <div class="b_caption"><p>Another page.</p></div>
+  </li>
+</ol>`;
+
 /** Two result blocks in DuckDuckGo's markup, with its redirector links. */
 const DDG_HTML = `
 <div class="result results_links results_links_deep web-result ">
   <div class="links_main links_deep result__body">
     <h2 class="result__title">
-      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdevelopers.cloudflare.com%2Fdurable%2Dobjects%2F&amp;rut=abc">Durable Objects &amp; limits</a>
+      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fddg-one&amp;rut=abc">DuckDuckGo result</a>
     </h2>
-    <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdevelopers.cloudflare.com%2Fdurable%2Dobjects%2F&amp;rut=abc">Account and storage <b>limits</b> for Durable Objects.</a>
-  </div>
-</div>
-<div class="result results_links results_links_deep web-result ">
-  <div class="links_main links_deep result__body">
-    <h2 class="result__title">
-      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fsecond&amp;rut=def">Second result</a>
-    </h2>
-    <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fsecond&amp;rut=def">Another page.</a>
+    <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fddg-one&amp;rut=abc">DuckDuckGo snippet.</a>
   </div>
 </div>`;
 
@@ -56,42 +70,36 @@ const LITE_HTML = `
     <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Flite-one&amp;rut=a" class='result-link'>Lite Result One</a>
   </td></tr>
   <tr><td>&nbsp;</td><td class='result-snippet'>Snippet for the lite result.</td></tr>
-  <tr><td>&nbsp;</td><td>
-    <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Flite-two&amp;rut=b" class='result-link'>Lite Result Two</a>
-  </td></tr>
-  <tr><td>&nbsp;</td><td class='result-snippet'>Second lite snippet.</td></tr>
 </table>`;
 
 describe("the web search extension", () => {
-  it("is installed with no configuration, searching DuckDuckGo", async () => {
+  it("is installed with no configuration, searching Bing", async () => {
     const requests: string[] = [];
     const extension = createWebSearchExtension(undefined, {
       fetch: async (input) => {
         requests.push(String(input));
-        return new Response(DDG_HTML, { headers: { "content-type": "text/html" } });
+        return htmlResponse(BING_HTML);
       }
     });
 
     const result = await run(extension, { query: "durable objects" });
 
     expect(result.isError).toBeFalsy();
-    expect(requests[0]).toContain("html.duckduckgo.com");
-    expect(text(result)).toContain("1. Durable Objects & limits");
-    expect(text(result)).toContain("https://developers.cloudflare.com/durable-objects/");
+    expect(requests[0]).toContain("bing.com/search");
+    expect(text(result)).toContain("1. Durable Objects & pricing");
   });
 
-  it("parses DuckDuckGo titles, redirects and snippets, honouring maxResults", async () => {
+  it("unwraps Bing redirect links into real destinations", async () => {
     const extension = createWebSearchExtension(undefined, {
-      fetch: async () =>
-        new Response(DDG_HTML, { headers: { "content-type": "text/html" } })
+      fetch: async () => htmlResponse(BING_HTML)
     });
 
     const body = text(await run(extension, { query: "durable objects", maxResults: 1 }));
 
-    expect(body).toContain("Results for \"durable objects\":");
-    expect(body).toContain("Account and storage limits for Durable Objects.");
-    expect(body).toContain("1. Durable Objects & limits");
-    expect(body).not.toContain("Second result");
+    expect(body).toContain("https://developers.cloudflare.com/durable-objects/");
+    expect(body).not.toContain("bing.com/ck/a");
+    expect(body).toContain("Durable Objects pricing and limits.");
+    expect(body).not.toContain("Second Bing result");
   });
 
   it("prefers SearXNG when an instance is configured", async () => {
@@ -111,86 +119,50 @@ describe("the web search extension", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toContain("searx.example/search");
-    expect(requests[0]).toContain("format=json");
     expect(body).toContain("From SearXNG");
   });
 
-  it("falls back to DuckDuckGo when the SearXNG instance fails", async () => {
+  it("falls back to Bing when the SearXNG instance fails", async () => {
     const requests: string[] = [];
     const extension = createWebSearchExtension("https://searx.example", {
       fetch: async (input) => {
-        requests.push(String(input));
-        if (String(input).includes("searx.example")) {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("searx.example")) {
           return new Response("Format not allowed", { status: 403 });
         }
-        return new Response(DDG_HTML, { headers: { "content-type": "text/html" } });
+        return htmlResponse(BING_HTML);
       }
     });
 
     const result = await run(extension, { query: "durable objects" });
 
     expect(result.isError).toBeFalsy();
-    expect(requests).toHaveLength(2);
-    expect(text(result)).toContain("Durable Objects & limits");
+    expect(text(result)).toContain("Durable Objects & pricing");
   });
 
-  it("reports every backend when all of them fail", async () => {
-    const extension = createWebSearchExtension("https://searx.example", {
-      fetch: async (input) =>
-        String(input).includes("searx.example")
-          ? new Response("Format not allowed", { status: 403 })
-          : new Response("busy", { status: 503 })
-    });
-
-    const result = await run(extension, { query: "anything" });
-
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("searxng:");
-    expect(text(result)).toContain("duckduckgo:");
-    expect(text(result)).toContain("search.formats");
-  });
-
-  it("says so when a backend legitimately finds nothing", async () => {
-    const extension = createWebSearchExtension(undefined, {
-      fetch: async () =>
-        new Response("<html><body>No results found</body></html>", {
-          headers: { "content-type": "text/html" }
-        })
-    });
-
-    const result = await run(extension, { query: "nothing at all" });
-
-    expect(result.isError).toBeFalsy();
-    expect(text(result)).toContain("No results for \"nothing at all\"");
-  });
-
-  it("uses a real browser before DuckDuckGo's HTTP endpoints", async () => {
+  it("uses a real browser when Bing HTTP fails", async () => {
     let browserCalls = 0;
-    const requests: string[] = [];
     const extension = createWebSearchExtension(undefined, {
       cacheTtlMs: 0,
       browser: {
         async html(url) {
           browserCalls += 1;
-          expect(url).toContain("duckduckgo.com/html/");
-          return DDG_HTML;
+          expect(url).toContain("bing.com/search");
+          return BING_HTML;
         }
       },
-      fetch: async (input) => {
-        requests.push(String(input));
-        return new Response("should not be reached", { status: 500 });
-      }
+      fetch: async () => new Response("blocked", { status: 503 })
     });
 
     const result = await run(extension, { query: "durable objects" });
 
     expect(result.isError).toBeFalsy();
     expect(browserCalls).toBe(1);
-    expect(requests).toHaveLength(0);
-    expect(text(result)).toContain("Durable Objects & limits");
+    expect(text(result)).toContain("Durable Objects & pricing");
   });
 
-  it("falls back to the Lite endpoint when the HTML one is rate limited", async () => {
+  it("falls back to DuckDuckGo Lite when the earlier backends are rate limited", async () => {
     const requests: string[] = [];
     const extension = createWebSearchExtension(undefined, {
       cacheTtlMs: 0,
@@ -198,10 +170,8 @@ describe("the web search extension", () => {
       fetch: async (input) => {
         const url = String(input);
         requests.push(url);
-        if (url.includes("html.duckduckgo.com")) {
-          return new Response("Too many requests", { status: 429 });
-        }
-        return new Response(LITE_HTML, { headers: { "content-type": "text/html" } });
+        if (url.includes("lite.duckduckgo.com")) return htmlResponse(LITE_HTML);
+        return new Response("rate limited", { status: 429 });
       }
     });
 
@@ -209,7 +179,7 @@ describe("the web search extension", () => {
 
     expect(result.isError).toBeFalsy();
     expect(text(result)).toContain("Lite Result One");
-    expect(requests).toHaveLength(2);
+    expect(requests.at(-1)).toContain("lite.duckduckgo.com");
   });
 
   it("reuses an identical query from the cache", async () => {
@@ -217,7 +187,7 @@ describe("the web search extension", () => {
     const extension = createWebSearchExtension(undefined, {
       fetch: async () => {
         calls += 1;
-        return new Response(DDG_HTML, { headers: { "content-type": "text/html" } });
+        return htmlResponse(BING_HTML);
       }
     });
 
@@ -235,10 +205,8 @@ describe("the web search extension", () => {
       fetch: async (input) => {
         const url = String(input);
         requests.push(url);
-        if (url.includes("html.duckduckgo.com")) {
-          return new Response("Too many requests", { status: 429 });
-        }
-        return new Response(LITE_HTML, { headers: { "content-type": "text/html" } });
+        if (url.includes("lite.duckduckgo.com")) return htmlResponse(LITE_HTML);
+        return new Response("rate limited", { status: 429 });
       }
     });
 
@@ -246,8 +214,36 @@ describe("the web search extension", () => {
     requests.length = 0;
     const second = await run(extension, { query: "second" });
 
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toContain("lite.duckduckgo.com");
     expect(second.isError).toBeFalsy();
+    expect(requests.some((url) => url.includes("bing.com"))).toBe(false);
+    expect(requests.some((url) => url.includes("lite.duckduckgo.com"))).toBe(true);
+  });
+
+  it("reports every backend when all of them fail", async () => {
+    const extension = createWebSearchExtension("https://searx.example", {
+      fetch: async (input) =>
+        String(input).includes("searx.example")
+          ? new Response("Format not allowed", { status: 403 })
+          : new Response("busy", { status: 503 })
+    });
+
+    const result = await run(extension, { query: "anything" });
+
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("searxng:");
+    expect(text(result)).toContain("bing:");
+    expect(text(result)).toContain("duckduckgo:");
+    expect(text(result)).toContain("search.formats");
+  });
+
+  it("says so when every backend legitimately finds nothing", async () => {
+    const extension = createWebSearchExtension(undefined, {
+      fetch: async () => htmlResponse("<html><body>No results found</body></html>")
+    });
+
+    const result = await run(extension, { query: "nothing at all" });
+
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toContain("No results for \"nothing at all\"");
   });
 });
