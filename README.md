@@ -224,6 +224,23 @@ the model is never offered a search it cannot run. `language` and
 10 seconds. Because pi fixes a session's tools at creation, start a new
 session after changing the variable.
 
+### Running an instance
+
+Public instances almost all leave the JSON API off, so `SEARXNG_URL` needs an
+instance you control. `searxng/` has a one-command one:
+
+```sh
+cd searxng && docker compose up -d
+curl "http://localhost:8080/search?q=test&format=json" | head -c 200
+```
+
+`searxng/settings.yml` turns on `json` beside `html` and disables the
+limiter. It ships a placeholder `secret_key`; generate a real one with
+`openssl rand -hex 32` before exposing the instance anywhere. `.dev.vars`
+points local `pnpm start` at `http://localhost:8080`. A deployed Worker needs
+a URL it can reach, so host the same container on a VPS or container host and
+set `SEARXNG_URL` there.
+
 ## Package sources
 
 Pi comes from npm: `@earendil-works/pi-durable`, `pi-ai`, `chord` and

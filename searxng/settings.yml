@@ -1,0 +1,20 @@
+# SearXNG settings for the pi harness example. Only the keys listed here
+# override the defaults; everything else comes from the image.
+use_default_settings: true
+
+general:
+  instance_name: "pi-harness search"
+
+server:
+  # Replace before exposing this instance anywhere: openssl rand -hex 32
+  secret_key: "CHANGE-ME-openssl-rand-hex-32"
+  limiter: false
+  public_instance: false
+
+search:
+  safe_search: 0
+  # `json` is what the web_search tool calls. SearXNG ships with html only,
+  # which is why public instances answer format=json with an HTML error page.
+  formats:
+    - html
+    - json
