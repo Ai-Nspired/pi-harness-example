@@ -3,8 +3,11 @@ import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 
 /** How long one backend may take before the next one is tried. */
 const DEFAULT_TIMEOUT_MS = 10_000;
-/** SearXNG gets longer: a sleeping instance answers 503 until it finishes booting. */
-const DEFAULT_SEARXNG_TIMEOUT_MS = 25_000;
+/**
+ * SearXNG gets longer: a sleeping free instance answered 503 for 35 seconds
+ * while it booted (measured 2026-11-12), so anything shorter skips our own index.
+ */
+const DEFAULT_SEARXNG_TIMEOUT_MS = 45_000;
 /** Results returned when the model does not ask for a count. */
 const DEFAULT_RESULTS = 5;
 /** The most results one call may ask for. */
