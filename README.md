@@ -216,14 +216,18 @@ local runs), for a self-hosted or public instance whose `settings.yml` lists
 "vars": { "SEARXNG_URL": "https://searx.example.com" }
 ```
 
-It works with no configuration. Backends are tried in order: SearXNG when
-`SEARXNG_URL` is set, then Bing over HTTP, then Bing through a real Chromium
-via Browser Rendering (the `BROWSER` binding, Workers Paid), then DuckDuckGo's
-HTML and Lite endpoints. Bing is the primary keyless engine because
-DuckDuckGo blocks Cloudflare egress — a real browser gets a challenge page
-there too, so it is kept only as a last resort. Identical queries are cached
-for five minutes and a backend that answers with a rate limit is skipped for
-one minute, so a burst of searches does not hammer one engine.
+`SEARXNG_URL` points at this project's own SearXNG instance on Render
+(`https://searing-render.onrender.com`), which serves the JSON API, so search
+does not depend on a public engine's tolerance for Cloudflare traffic.
+
+Backends are tried in order: that SearXNG instance, Bing over HTTP, Bing
+through a real Chromium via Browser Rendering (the `BROWSER` binding, Workers
+Paid), then DuckDuckGo's HTML and Lite endpoints as last resorts. DuckDuckGo
+blocks Cloudflare egress — a real browser gets a challenge page there too. The
+Render free instance sleeps when idle, so the first search after a quiet spell
+can miss the 10-second budget and fall through to Bing; later searches use it.
+Identical queries are cached for five minutes and a backend that answers with
+a rate limit is skipped for one minute.
 
 SearXNG also honours `language` and `safeSearch`, and the tool takes `query`,
 `maxResults` (1–10), `category` (`general` or `news`) and `timeRange`
@@ -233,11 +237,9 @@ session's tools at creation, start a new session after changing the variable.
 
 ### Running an instance
 
-DuckDuckGo works with no setup, but it is a scraped HTML endpoint: it can
-rate-limit a busy Worker, and a SearXNG instance is more stable and gives you
-the engine list you choose. Public instances almost all leave the JSON API
-off, so `SEARXNG_URL` needs an instance you control. `searxng/` has a
-one-command one:
+The deployed Worker uses the Render instance above. For local work, `searxng/`
+has a one-command instance of your own. Public instances almost all leave the
+JSON API off, so `SEARXNG_URL` needs an instance you control:
 
 ```sh
 cd searxng && docker compose up -d

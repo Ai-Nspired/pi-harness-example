@@ -36,11 +36,14 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
 
 ## Project facts worth remembering
 
-- `web_search` is a native pi-durable extension (`src/extensions/web-search.ts`)
-  and tries: SearXNG (`SEARXNG_URL`), Bing over HTTP, Bing through a real
-  Chromium via Browser Rendering (`BROWSER` binding, Workers Paid), then
-  DuckDuckGo HTML and Lite. DuckDuckGo blocks Cloudflare egress, including
-  from Browser Rendering, so it is only a last resort.
+- `web_search` is a native pi-durable extension (`src/extensions/web-search.ts`).
+  `SEARXNG_URL` is our own instance on Render
+  (`https://searing-render.onrender.com`), tried first; then Bing over HTTP,
+  Bing through a real Chromium via Browser Rendering (`BROWSER` binding,
+  Workers Paid), then DuckDuckGo HTML and Lite. DuckDuckGo blocks Cloudflare
+  egress, including from Browser Rendering, so it is only a last resort. The
+  Render free instance sleeps, so the first search after idle may fall through
+  to Bing.
 - Successful searches are cached for five minutes; a backend that answers with
   a rate limit is skipped for one minute.
 - `pnpm-lock.yaml` is committed; `agents` is pinned to the 0.32 series because

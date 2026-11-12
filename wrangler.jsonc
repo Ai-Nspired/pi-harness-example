@@ -5,9 +5,9 @@
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "ai": { "binding": "AI", "remote": true },
-  // Optional: prefer a SearXNG instance with "json" in `search.formats`.
-  // Empty searches through DuckDuckGo instead.
-  "vars": { "SEARXNG_URL": "" },
+  // Our own SearXNG instance (Render), which serves the JSON API. Searches
+  // go here first, so they do not depend on engines that block Cloudflare.
+  "vars": { "SEARXNG_URL": "https://searing-render.onrender.com" },
   // Real Chromium for web search, so a rate-limited page can still be read.
   // Needs the Workers Paid plan.
   "browser": { "binding": "BROWSER" },
