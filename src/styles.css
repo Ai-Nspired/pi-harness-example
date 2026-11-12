@@ -9,37 +9,12 @@ html,
 body,
 #root {
   min-width: 320px;
-  /* `dvh` follows the mobile toolbar collapsing. `100vh` first so an older
-     browser keeps a usable height rather than a zero one. */
-  height: 100vh;
-  height: 100dvh;
+  min-height: 100%;
   margin: 0;
-  /* The app has its own scrolling column. Without these, iOS and Android
-     rubber-band the whole page and the UI visibly shifts under a thumb. */
-  overflow: hidden;
-  overscroll-behavior: none;
 }
 
 body {
-  -webkit-tap-highlight-color: transparent;
-  -webkit-text-size-adjust: 100%;
-  touch-action: manipulation;
-}
-
-/* The transcript follows its own end from script. Browser scroll anchoring
-   would shift the content under the reader while tokens stream in, which is
-   what made a drag fight the view. */
-.chat-scroll {
-  overflow-anchor: none;
-  overscroll-behavior: contain;
-}
-
-/* The notch and home indicator sit over the page with `viewport-fit=cover`. */
-.app-shell {
-  padding-top: env(safe-area-inset-top);
-  padding-right: env(safe-area-inset-right);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
+  min-height: 100vh;
 }
 
 /* Streamdown theme bridge — maps shadcn-style tokens to Kumo semantics */

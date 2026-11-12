@@ -382,7 +382,6 @@ function App() {
   const scrollRef = useRef<HTMLElement>(null);
   /** False once the reader has scrolled away from the end of the transcript. */
   const pinned = useRef(true);
-  const [fullscreen, setFullscreen] = useState(false);
   const {
     status,
     messages,
@@ -414,27 +413,6 @@ function App() {
       element.scrollHeight - element.scrollTop - element.clientHeight < 80;
   };
 
-  useEffect(() => {
-    const update = () => setFullscreen(document.fullscreenElement !== null);
-    document.addEventListener("fullscreenchange", update);
-    return () => document.removeEventListener("fullscreenchange", update);
-  }, []);
-
-  // Element fullscreen is how Android loses the browser chrome. iOS Safari has
-  // none, so there the home-screen manifest is the only route.
-  const canFullscreen = "requestFullscreen" in document.documentElement;
-  const toggleFullscreen = async () => {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        return;
-      }
-      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-    } catch {
-      // Refused or unsupported: leave the page as it is rather than showing an
-      // error for a display preference.
-    }
-  };
 
   const connected = status === "open";
 
@@ -456,7 +434,7 @@ function App() {
 
   return (
     <div
-      className={`app-shell grid h-dvh overflow-hidden bg-kumo-elevated text-kumo-default ${
+      className={`grid h-dvh overflow-hidden bg-kumo-elevated text-kumo-default ${
         toolsOpen
           ? "lg:grid-cols-[minmax(520px,1fr)_minmax(300px,26vw)]"
           : "grid-cols-1"
@@ -487,20 +465,6 @@ function App() {
                     ? "Connecting"
                     : "Reconnecting"}
               </Badge>
-              {canFullscreen ? (
-                <Button
-                  variant="ghost"
-                  shape="square"
-                  aria-label={fullscreen ? "Exit full screen" : "Full screen"}
-                  aria-pressed={fullscreen}
-                  onClick={() => void toggleFullscreen()}
-                  icon={
-                    <span aria-hidden className="text-base leading-none">
-                      ⛶
-                    </span>
-                  }
-                />
-              ) : null}
               <Button
                 variant="ghost"
                 shape="square"
@@ -524,7 +488,8 @@ function App() {
         <main
           ref={scrollRef}
           onScroll={onScroll}
-          className="chat-scroll min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto"
+          style={{ overflowAnchor: "none", overscrollBehavior: "contain" }}
         >
           <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
             {empty ? (
