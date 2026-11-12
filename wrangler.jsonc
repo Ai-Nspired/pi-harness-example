@@ -7,7 +7,16 @@
   "ai": { "binding": "AI", "remote": true },
   // Our own SearXNG instance (Render), which serves the JSON API. Searches
   // go here first, so they do not depend on engines that block Cloudflare.
-  "vars": { "SEARXNG_URL": "https://searing-render.onrender.com" },
+  "vars": {
+    "SEARXNG_URL": "https://searing-render.onrender.com",
+    // OpenRouter presets you create in the dashboard, as slugs. Each becomes
+    // the model `openrouter/@preset/<slug>`. OPENROUTER_API_KEY is a secret,
+    // set in the dashboard, never here.
+    "OPENROUTER_PRESETS": "",
+    "OPENROUTER_DEFAULT_PRESET": "",
+    "OPENROUTER_PROVIDER_ORDER": "",
+    "OPENROUTER_MODEL": "z-ai/glm-5.3-flash"
+  },
   // Real Chromium for web search, so a rate-limited page can still be read.
   // Needs the Workers Paid plan.
   "browser": { "binding": "BROWSER" },

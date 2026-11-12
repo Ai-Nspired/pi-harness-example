@@ -5,6 +5,11 @@ interface __BaseEnv_Env {
   AI: Ai;
   BROWSER: Fetcher;
   SEARXNG_URL: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_PRESETS?: string;
+  OPENROUTER_DEFAULT_PRESET?: string;
+  OPENROUTER_PROVIDER_ORDER?: string;
+  OPENROUTER_MODEL?: string;
   PiAgent: DurableObjectNamespace<import("./src/server").PiAgent>;
 }
 declare namespace Cloudflare {

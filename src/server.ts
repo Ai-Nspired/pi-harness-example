@@ -12,6 +12,7 @@ import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
 import { createWebSearchExtension } from "./extensions/web-search";
+import { createOpenRouterSetup } from "./openrouter";
 import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
@@ -71,6 +72,9 @@ export class PiAgent extends DurableObject<Env> {
       })
     ]
   });
+  // OpenRouter presets, when a key is configured; otherwise Workers AI.
+  readonly openrouter = createOpenRouterSetup(this.env);
+  readonly models = createModels();
   readonly registry = createRegistry();
   readonly harness = new PiHarness({
     harness: async ({ storage, context, onWake }) => {
@@ -87,8 +91,7 @@ export class PiAgent extends DurableObject<Env> {
           browser: createBrowserRunner(this.env)
         })
       );
-      const models = createModels();
-      models.setProvider(this.ai.provider);
+      const models = this.openModels();
       return Harness.open(
         storage,
         {
@@ -105,8 +108,26 @@ export class PiAgent extends DurableObject<Env> {
         context
       );
     },
-    defaults: { model: this.ai(MODEL_ID), thinkingLevel: "low" }
+    defaults: { model: this.defaultModel(), thinkingLevel: "low" }
   });
+
+  /**
+   * The provider registry pi resolves models against: OpenRouter when a key is
+   * set, so `openrouter/@preset/<slug>` resolves, and Workers AI otherwise.
+   */
+  private openModels() {
+    this.models.setProvider(this.openrouter?.provider ?? this.ai.provider);
+    return this.models;
+  }
+
+  /** Start on the configured preset, or on Workers AI when there is no key. */
+  private defaultModel() {
+    if (this.openrouter) {
+      const preset = this.openModels().getModel("openrouter", this.openrouter.defaultModelId);
+      if (preset) return preset;
+    }
+    return this.ai(MODEL_ID);
+  }
 
   // App glue, not the harness: how this app puts sessions on a socket.
   readonly sockets = new PiSessionSockets(this.harness, this.registry, (tag) =>
