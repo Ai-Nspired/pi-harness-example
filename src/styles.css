@@ -9,12 +9,29 @@ html,
 body,
 #root {
   min-width: 320px;
-  min-height: 100%;
+  /* `dvh` follows the mobile toolbar collapsing. `100vh` first so an older
+     browser keeps a usable height rather than a zero one. */
+  height: 100vh;
+  height: 100dvh;
   margin: 0;
+  /* The app has its own scrolling column. Without these, iOS and Android
+     rubber-band the whole page and the UI visibly shifts under a thumb. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
-  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
+/* The notch and home indicator sit over the page with `viewport-fit=cover`. */
+.app-shell {
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
 }
 
 /* Streamdown theme bridge — maps shadcn-style tokens to Kumo semantics */
