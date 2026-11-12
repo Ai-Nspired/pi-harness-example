@@ -11,6 +11,7 @@ import { PiHarness, ROOT_SESSION } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
+import { createAgentExtension } from "./extensions/agents";
 import { extractDocument, uploadName } from "./extract";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
@@ -23,6 +24,21 @@ import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
 const MODEL_ID = "@cf/zai-org/glm-5.3-flash";
+/** The sibling Workers this deployment may be bound to, by binding name. */
+const AGENT_BINDINGS = ["AIN", "AI-PROXY", "ORPROXY", "TRUE-ADMIN"] as const;
+
+/** The service bindings this deployment actually has, by name. */
+function serviceBindings(env: Env): Record<string, Fetcher> {
+  const bindings = env as unknown as Record<string, unknown>;
+  const found: Record<string, Fetcher> = {};
+  for (const name of AGENT_BINDINGS) {
+    const value = bindings[name];
+    if (value && typeof (value as Fetcher).fetch === "function") {
+      found[name] = value as Fetcher;
+    }
+  }
+  return found;
+}
 /** Speech to text on the AI binding, so dictation needs no key of its own. */
 const TRANSCRIBE_MODEL = "@cf/openai/whisper-large-v3-turbo";
 /** A dictation longer than this is a mistake, not a message. */
@@ -162,6 +178,12 @@ export class PiAgent extends DurableObject<Env> {
             : undefined
         })
       );
+      // The other Workers, when this deployment is bound to them: the tool takes
+      // a path from the model rather than assuming their APIs.
+      const agents = serviceBindings(this.env);
+      if (Object.keys(agents).length > 0) {
+        this.registry.install(createAgentExtension(agents));
+      }
       const models = this.openModels();
       return Harness.open(
         storage,
@@ -511,6 +533,7 @@ export default {
           model: setup?.defaultModelId ?? MODEL_ID,
           provider: setup ? "openrouter" : "workers-ai",
           presets: setup?.presets ?? [],
+          agents: Object.keys(serviceBindings(env)),
           note: setup
             ? undefined
             : "OPENROUTER_API_KEY is not set, so presets are not used"
