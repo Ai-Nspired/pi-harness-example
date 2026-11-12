@@ -58,6 +58,13 @@ Still billed in **neurons**: `$0.011 per 1,000 neurons`, with **10,000 neurons
 per day free** on both plans. The per-million-token column in the docs is a
 conversion, not a separate scheme.
 
+Cloudflare *did* announce the end of neurons: at Birthday Week in September
+2024 it said it was "moving towards unit-based pricing and saying goodbye to
+neurons", effective 1 October 2024. The change never happened. As of the
+October 2026 pricing page, per-model unit prices are displayed but **billing is
+still in neurons in the back end**. The retirement was announced, not executed,
+which is where the confusion in the earlier notes came from.
+
 | Model | Input / M | Cached input / M | Output / M |
 | --- | --- | --- | --- |
 | `@cf/zai-org/glm-5.3-flash` (this repo) | $0.15 | $0.03 | $0.50 |
@@ -113,6 +120,23 @@ OpenRouter model page for the route you actually get. Routing is not pinned by
 default, so pin a provider (`provider.order` or pricing sort) if the rate has to
 hold. Free models are capped at 20 requests/minute and 50/day (1,000/day after
 a lifetime $10 purchase) and are not suitable for a tool-calling harness.
+
+### Observed spend beats token math
+
+You spent **$2 in the last month** across free and cheap models. At glm-5.3-flash
+list price (6k in / 600 out) $2 buys roughly 1,600 turns — far more than the
+30-turns-a-day scenario in the cost section. Read those tables as ceilings at
+list price, not as forecasts.
+
+The $1 spike in the last week fits a mis-routed model almost exactly. Claude
+Opus 5.5 bills at **$4/M input, $20/M output, $0.20/M cached reads**, so one
+30k-context turn with 2k of output costs **$0.16** — about 29× a glm-5.3-flash
+turn of the same size. Six of those is your dollar, and nothing else at your
+volume gets there.
+
+Free models have their own ceiling: 20 requests/minute and **50 requests/day**,
+rising to 1,000/day only after a lifetime $10 of credits. A harness running on
+`:free` variants hits that limit long before it costs anything.
 
 **This repo does not call OpenRouter.** Inference goes over the `AI` binding to
 Workers AI, so OpenRouter credits are not spent by this assistant. If you are
@@ -207,6 +231,9 @@ On OpenRouter there is no 10,000-neuron free allowance, so every token is paid
 for. The offset is provider choice: pinning the cheapest reliable route is worth
 roughly 2.7× against the Z.ai list price.
 
+These assume 30 or 100 turns a day at list price. Observed spend is $2 a month,
+so treat them as ceilings rather than forecasts.
+
 **The floor is $5/month** for Workers Paid, and you need it anyway: the Free
 plan's 10 ms CPU per invocation cannot run this harness, and `BROWSER` plus
 KV-backed Durable Objects are Paid features.
@@ -225,7 +252,8 @@ removes that; it is optional and outside Cloudflare.
 
 ### Corrections to `pihnotes.txt`
 
-- Workers AI did **not** retire neurons; it is $0.011/1,000 with 10k/day free.
+- Workers AI still bills neurons ($0.011/1,000, 10k/day free). The end of
+  neurons was announced in September 2024 and never carried out.
 - DO SQLite rows read are $0.001/million after 25 **billion** included, not
   $0.20/million.
 - DO storage is $0.20/GB-month, not D1's $0.75.
