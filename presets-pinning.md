@@ -29,7 +29,9 @@ configuration.
 | `OPENROUTER_API_KEY` | secret | Your OpenRouter key. Without it, the Worker uses Workers AI and presets are ignored. |
 | `OPENROUTER_PRESETS` | var | Comma-separated preset entries, e.g. `fast, smart, z-ai/glm-4.7@preset/deep`. See the three forms below. |
 | `OPENROUTER_DEFAULT_PRESET` | var | Slug a new session starts on. Falls back to the first configured preset. |
-| `OPENROUTER_PROVIDER_ORDER` | var | Optional fallback pin, e.g. `Wafer, Z.ai`. Presets are the primary place for routing. |
+| `OPENROUTER_PROVIDER_ORDER` | var | Optional explicit order, e.g. `Wafer, Z.ai`. Presets are the primary place for routing. |
+| `OPENROUTER_SORT` | var | `price`, `throughput` or `latency`. `price` keeps each request on the cheapest provider that serves the model. |
+| `OPENROUTER_MAX_PRICE` | var | Ceiling as `prompt,completion` in USD per million tokens, e.g. `0.12,0.40`. A request that cannot be served under it fails instead of billing. |
 | `OPENROUTER_MODEL` | var | Model whose metadata (context window, price) preset models inherit. Default `z-ai/glm-5.3-flash`. |
 
 `wrangler.jsonc` carries the four non-secret values with empty defaults, so a
@@ -155,6 +157,28 @@ Two layers, in order of preference:
 Presets also accept `max_price`, which is the honest way to make a cost ceiling
 stick: a request that cannot be served under it fails instead of silently
 running on an expensive route.
+
+This repo sends both controls on every request that inherits
+`OPENROUTER_MODEL`'s metadata:
+
+```json
+{
+  "model": "@preset/truth",
+  "provider": { "sort": "price", "max_price": { "prompt": 0.12, "completion": 0.4 } },
+  "messages": [{ "role": "user", "content": "hello" }]
+}
+```
+
+`sort: price` picks the cheapest provider serving that model, which is the part
+that prevents drift: the same `glm-5.3-flash` ranges from Wafer's
+$0.054/$0.20 to Z.ai's $0.15/$0.50 per million. `max_price` is the backstop, so
+if every cheap route is unavailable the request **fails visibly** rather than
+quietly running at three times the rate.
+
+A preset pinned to a different model (`model@preset/slug`) keeps `sort` but not
+the ceiling, because the ceiling was measured for `OPENROUTER_MODEL`'s price
+class and a deliberately larger model may legitimately cost more. Set the
+ceiling to fit your most expensive preset if you want it applied everywhere.
 
 ## Verifying
 

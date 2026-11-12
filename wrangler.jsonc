@@ -19,6 +19,13 @@
     // set in the dashboard, never here.
     "OPENROUTER_PRESETS": "truth, doc, micro, mnl, operator",
     "OPENROUTER_DEFAULT_PRESET": "truth",
+    // Route on price, never on luck: OpenRouter picks the cheapest provider
+    // that serves the model. Same model, up to 2.7x difference between them.
+    "OPENROUTER_SORT": "price",
+    // Hard ceiling in USD per million tokens, prompt then completion. A request
+    // that cannot be served under it fails visibly instead of billing a
+    // pricier route (Z.ai is $0.15/$0.50, Wafer $0.054/$0.20).
+    "OPENROUTER_MAX_PRICE": "0.12,0.40",
     "OPENROUTER_PROVIDER_ORDER": "",
     "OPENROUTER_MODEL": "z-ai/glm-5.3-flash"
   },

@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import {
   createOpenRouterSetup,
+  parseMaxPrice,
   parsePresetEntries,
   parsePresetSlugs,
   parseProviderOrder,
   presetModelId,
-  withProviderOrder
+  withProviderOrder,
+  withProviderPin
 } from "../openrouter";
 
 describe("preset slugs", () => {
@@ -66,6 +68,25 @@ describe("provider pinning", () => {
   it("puts the order where OpenAI-compatible requests read it", () => {
     const pinned = withProviderOrder(base, ["Wafer", "Z.ai"]);
     expect(pinned.samplingParams).toEqual({ provider: { order: ["Wafer", "Z.ai"] } });
+  });
+
+  it("parses a price ceiling and rejects nonsense", () => {
+    expect(parseMaxPrice("0.12, 0.40")).toEqual({ prompt: 0.12, completion: 0.4 });
+    expect(parseMaxPrice("")).toBeUndefined();
+    expect(parseMaxPrice("0.12")).toBeUndefined();
+    expect(parseMaxPrice("free,0.4")).toBeUndefined();
+  });
+
+  it("carries the price sort and the ceiling to the request", () => {
+    const pinned = withProviderPin(base, {
+      order: [],
+      sort: "price",
+      maxPrice: { prompt: 0.12, completion: 0.4 }
+    });
+
+    expect(pinned.samplingParams).toEqual({
+      provider: { sort: "price", max_price: { prompt: 0.12, completion: 0.4 } }
+    });
   });
 });
 
@@ -180,6 +201,32 @@ describe("the OpenRouter provider", () => {
 
     const preset = setup.provider.getModels().find((model) => model.id === "@preset/fast");
     expect(preset?.samplingParams).toEqual({ provider: { order: ["Wafer"] } });
+  });
+
+  it("routes by price under a ceiling on the configured model", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_PRESETS: "fast",
+      OPENROUTER_SORT: "price",
+      OPENROUTER_MAX_PRICE: "0.12,0.40"
+    })!;
+
+    const preset = setup.provider.getModels().find((model) => model.id === "@preset/fast");
+    expect(preset?.samplingParams).toEqual({
+      provider: { sort: "price", max_price: { prompt: 0.12, completion: 0.4 } }
+    });
+  });
+
+  it("does not cap a preset pinned to a different model", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_PRESETS: "z-ai/glm-4.7@preset/deep",
+      OPENROUTER_SORT: "price",
+      OPENROUTER_MAX_PRICE: "0.12,0.40"
+    })!;
+
+    const preset = setup.provider.getModels().find((model) => model.id === "z-ai/glm-4.7@preset/deep");
+    expect(preset?.samplingParams).toEqual({ provider: { sort: "price" } });
   });
 
   it("resolves preset auth from the Worker environment", async () => {

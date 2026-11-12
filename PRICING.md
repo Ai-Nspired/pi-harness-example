@@ -98,6 +98,11 @@ The minimum is what bites: $5 credits cost $5.80 (16% effective), $10 cost
 $10.80 (8%), and only from about $14.55 does the 5.5% rate actually apply. So
 the real multiplier on inference spend is **×1.055**, or worse on small top-ups.
 
+Routing is pinned in configuration: `OPENROUTER_SORT=price` picks the cheapest
+provider serving the model, and `OPENROUTER_MAX_PRICE` fails a request rather
+than letting it run above the ceiling. Without those, the same model can bill
+at any of the rates below.
+
 `z-ai/glm-5.3-flash` is served by many providers at very different prices, per
 million tokens:
 

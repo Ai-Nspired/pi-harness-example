@@ -11,6 +11,8 @@ interface __BaseEnv_Env {
   OPENROUTER_PRESETS?: string;
   OPENROUTER_DEFAULT_PRESET?: string;
   OPENROUTER_PROVIDER_ORDER?: string;
+  OPENROUTER_SORT?: string;
+  OPENROUTER_MAX_PRICE?: string;
   OPENROUTER_MODEL?: string;
   PiAgent: DurableObjectNamespace<import("./src/server").PiAgent>;
 }

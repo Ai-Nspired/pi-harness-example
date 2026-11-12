@@ -21,6 +21,10 @@ export interface OpenRouterEnv {
   OPENROUTER_DEFAULT_PRESET?: string;
   /** Optional provider order sent with every request, e.g. "Wafer,Z.ai". */
   OPENROUTER_PROVIDER_ORDER?: string;
+  /** `price`, `throughput` or `latency`. `price` keeps routing on the cheapest. */
+  OPENROUTER_SORT?: string;
+  /** Ceiling as `prompt,completion` in USD per million tokens, e.g. `0.12,0.40`. */
+  OPENROUTER_MAX_PRICE?: string;
   /** Model whose metadata (context window, pricing) preset models inherit. */
   OPENROUTER_MODEL?: string;
 }
@@ -92,6 +96,37 @@ export function parseProviderOrder(raw: string | undefined): string[] {
     .filter((part) => part.length > 0);
 }
 
+/** How OpenRouter ranks providers when no explicit order is given. */
+export type ProviderSort = "price" | "throughput" | "latency";
+
+export function parseProviderSort(raw: string | undefined): ProviderSort | undefined {
+  const value = raw?.trim().toLowerCase();
+  return value === "price" || value === "throughput" || value === "latency" ? value : undefined;
+}
+
+/**
+ * `"0.12,0.40"` → a ceiling in USD per million tokens, prompt then completion.
+ * OpenRouter refuses a request it cannot serve under that price, so an
+ * expensive route becomes a visible failure instead of a silent bill.
+ */
+export function parseMaxPrice(
+  raw: string | undefined
+): { prompt: number; completion: number } | undefined {
+  const parts = (raw ?? "").split(",").map((part) => Number.parseFloat(part.trim()));
+  if (parts.length !== 2) return undefined;
+  const [prompt, completion] = parts;
+  if (!Number.isFinite(prompt) || !Number.isFinite(completion)) return undefined;
+  if (prompt <= 0 || completion <= 0) return undefined;
+  return { prompt, completion };
+}
+
+/** What every request carries so routing cannot drift to a pricier provider. */
+export interface ProviderPin {
+  readonly order: readonly string[];
+  readonly sort?: ProviderSort;
+  readonly maxPrice?: { prompt: number; completion: number };
+}
+
 export function presetModelId(slug: string): string {
   return `${PRESET_PREFIX}${slug}`;
 }
@@ -111,15 +146,23 @@ export function baseModelId(id: string): string {
  * `samplingParams` are merged into an OpenAI-compatible request body as-is,
  * which is where OpenRouter reads `provider.order`.
  */
+export function withProviderPin<TApi extends Api>(
+  model: Model<TApi>,
+  pin: ProviderPin
+): Model<TApi> {
+  const provider: Record<string, unknown> = {};
+  if (pin.order.length > 0) provider.order = [...pin.order];
+  if (pin.sort) provider.sort = pin.sort;
+  if (pin.maxPrice) provider.max_price = { ...pin.maxPrice };
+  if (Object.keys(provider).length === 0) return model;
+  return { ...model, samplingParams: { ...model.samplingParams, provider } };
+}
+
 export function withProviderOrder<TApi extends Api>(
   model: Model<TApi>,
   order: readonly string[]
 ): Model<TApi> {
-  if (order.length === 0) return model;
-  return {
-    ...model,
-    samplingParams: { ...model.samplingParams, provider: { order: [...order] } }
-  };
+  return withProviderPin(model, { order });
 }
 
 /**
@@ -173,11 +216,19 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
       ? offCatalogModel(wanted)
       : catalog[0];
   if (!baseModel) return undefined;
-  // Add the model when the catalogue does not already carry this exact id —
-  // including a variant, whose base entry exists but whose id does not.
-  const extra = known && known.id === wanted ? [] : [baseModel];
 
   const order = parseProviderOrder(env.OPENROUTER_PROVIDER_ORDER);
+  const sort = parseProviderSort(env.OPENROUTER_SORT);
+  const maxPrice = parseMaxPrice(env.OPENROUTER_MAX_PRICE);
+  const pin: ProviderPin = {
+    order,
+    ...(sort ? { sort } : {}),
+    ...(maxPrice ? { maxPrice } : {})
+  };
+  const routes = order.length > 0 || sort !== undefined || maxPrice !== undefined;
+  // The catalogue's own entry for this model is unpinned, so it is shadowed by
+  // a pinned copy with the same id whenever routing is configured.
+  const pinnedBase = withProviderPin(baseModel, pin);
   const entries = parsePresetEntries(env.OPENROUTER_PRESETS);
   const presets = entries.map((entry) => entry.slug);
   const presetModels = entries.map((entry) => {
@@ -188,10 +239,18 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
           (model) => model.id === entry.modelId || model.id === baseModelId(entry.modelId!)
         ) ?? offCatalogModel(entry.modelId)
       : baseModel;
-    return withProviderOrder({ ...meta, id: entry.id, name: `OpenRouter ${entry.id}` }, order);
+    // The ceiling was measured for OPENROUTER_MODEL's price class, so a preset
+    // pinned to another model keeps the routing but not the ceiling.
+    const ownPin: ProviderPin =
+      entry.modelId && baseModelId(entry.modelId) !== baseModelId(wanted)
+        ? { order, ...(sort ? { sort } : {}) }
+        : pin;
+    return withProviderPin({ ...meta, id: entry.id, name: `OpenRouter ${entry.id}` }, ownPin);
   });
   // Registered ids the catalogue does not already carry, including presets.
+  const extra = known && known.id === wanted && !routes ? [] : [pinnedBase];
   const added = [...extra, ...presetModels];
+  const shadowed = known && known.id === wanted && routes ? new Set([wanted]) : new Set<string>();
 
   const login = base.auth.apiKey?.login;
   const provider: OpenRouterSetup["provider"] = {
@@ -204,7 +263,10 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
         resolve: async () => ({ auth: { apiKey: key }, source: "OPENROUTER_API_KEY" })
       }
     },
-    getModels: () => [...base.getModels(), ...added]
+    getModels: () => [
+      ...base.getModels().filter((model) => !shadowed.has(model.id)),
+      ...added
+    ]
   };
 
   // Accept a slug, `@preset/slug`, or the fully pinned model id.
