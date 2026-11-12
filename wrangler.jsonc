@@ -12,8 +12,8 @@
     // OpenRouter presets you create in the dashboard, as slugs. Each becomes
     // the model `openrouter/@preset/<slug>`. OPENROUTER_API_KEY is a secret,
     // set in the dashboard, never here.
-    "OPENROUTER_PRESETS": "",
-    "OPENROUTER_DEFAULT_PRESET": "",
+    "OPENROUTER_PRESETS": "truth, doc, micro, mnl, operator",
+    "OPENROUTER_DEFAULT_PRESET": "truth",
     "OPENROUTER_PROVIDER_ORDER": "",
     "OPENROUTER_MODEL": "z-ai/glm-5.3-flash"
   },
