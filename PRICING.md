@@ -74,6 +74,51 @@ conversion, not a separate scheme.
 million output tokens, so 10,000 free neurons is roughly 6,000 input + 600
 output tokens × 92.
 
+## OpenRouter (your main inference API)
+
+OpenRouter does not mark up inference: each request is billed at the routed
+provider's own list price. It makes its money on the **credit purchase**:
+
+| | Rate |
+| --- | --- |
+| Card top-up, Standard | 5.5% of the order, **$0.80 minimum** |
+| Crypto top-up | 5.0% flat, no minimum |
+| Business plan | 8% of the order |
+| BYOK | free up to $25,000/month of list-price inference, then 5% |
+| Minimum purchase | $5 per transaction; credits expire after 365 days |
+
+The minimum is what bites: $5 credits cost $5.80 (16% effective), $10 cost
+$10.80 (8%), and only from about $14.55 does the 5.5% rate actually apply. So
+the real multiplier on inference spend is **×1.055**, or worse on small top-ups.
+
+`z-ai/glm-5.3-flash` is served by many providers at very different prices, per
+million tokens:
+
+| Provider | Input | Output |
+| --- | --- | --- |
+| Wafer | $0.054 | $0.20 |
+| Open Inference | $0.06 | $0.30 |
+| Darkbloom | $0.065 | $0.18 |
+| Tenstorrent | $0.075 | $0.25 |
+| GMICloud | $0.075 | $0.25 |
+| NovitaAI | $0.084 | $0.28 |
+| inference.net | $0.108 | $0.35 |
+| DeepInfra | $0.15 | $0.50 |
+| Z.ai | $0.15 | $0.50 |
+
+The Z.ai route matches Z.ai's own list price ($0.15 / $0.50, cached input
+$0.03). Some listings quote $0.075 / $0.25 from a September 2026 promotion, and
+third-party aggregators quote figures as low as $0.034 / $0.083 — trust the
+OpenRouter model page for the route you actually get. Routing is not pinned by
+default, so pin a provider (`provider.order` or pricing sort) if the rate has to
+hold. Free models are capped at 20 requests/minute and 50/day (1,000/day after
+a lifetime $10 purchase) and are not suitable for a tool-calling harness.
+
+**This repo does not call OpenRouter.** Inference goes over the `AI` binding to
+Workers AI, so OpenRouter credits are not spent by this assistant. If you are
+also paying OpenRouter, it is for other tools — or you want this harness moved
+onto it, which is a code change plus an `OPENROUTER_API_KEY` Worker secret.
+
 ## Browser Run (formerly Browser Rendering)
 
 | | Free | Paid |
@@ -110,7 +155,9 @@ It uses four meters and nothing else:
    agent-routing and static asset traffic (assets are free).
 2. **The `PiAgent` Durable Object** — requests, duration while a turn runs, and
    SQLite storage for pi's tables and the workspace filesystem.
-3. **Workers AI** — `@cf/zai-org/glm-5.3-flash`, `thinkingLevel: "low"`.
+3. **Workers AI** — `@cf/zai-org/glm-5.3-flash`, `thinkingLevel: "low"`. There
+   is no OpenRouter call in this repo; see the OpenRouter section for what that
+   path would cost.
 4. **Browser Run** — only when SearXNG and Bing HTTP both fail, because search
    tries the Render instance first.
 
@@ -144,18 +191,37 @@ requests against 10 million, ~2,900 GB-s of DO duration against 400,000, and a
 few MB of DO storage against 5 GB. Browser Run stays near zero because the
 Render instance answers first.
 
+### If inference runs on OpenRouter instead
+
+Same token assumptions, billed at the routed provider and then ×1.055 for the
+credit fee:
+
+| Usage | Provider rate | Inference / month | With the 5.5% fee | Plus $5 Cloudflare |
+| --- | --- | --- | --- | --- |
+| Regular, 30 turns/day | Wafer $0.054 / $0.20 | $0.40 | $0.42 | **$5.42** |
+| Regular, 30 turns/day | Z.ai $0.15 / $0.50 | $1.08 | $1.14 | **$6.14** |
+| Heavy, 100 turns/day | Wafer $0.054 / $0.20 | $2.91 | $3.07 | **$8.07** |
+| Heavy, 100 turns/day | Z.ai $0.15 / $0.50 | $7.95 | $8.39 | **$13.39** |
+
+On OpenRouter there is no 10,000-neuron free allowance, so every token is paid
+for. The offset is provider choice: pinning the cheapest reliable route is worth
+roughly 2.7× against the Z.ai list price.
+
 **The floor is $5/month** for Workers Paid, and you need it anyway: the Free
 plan's 10 ms CPU per invocation cannot run this harness, and `BROWSER` plus
 KV-backed Durable Objects are Paid features.
 
-### The two real levers
+### The real levers
 
 - **Session length.** Every turn resends the transcript, so a 50-turn session
   costs several times a 5-turn one. Start a new session when a conversation is
   done — you already do this after deploys.
+- **Provider choice, if you move to OpenRouter.** The same model ranges from
+  $0.054/$0.20 to $0.15/$0.50 per million tokens depending on the route; that
+  is a 2.7× swing on the inference line.
 - **Always-on SearXNG.** The Render free instance sleeps, so the first search
-  after a quiet spell falls through to Bing. Render Starter is $7/month and
-  removes that; it is optional and outside Cloudflare.
+after a quiet spell falls through to Bing. Render Starter is $7/month and
+removes that; it is optional and outside Cloudflare.
 
 ### Corrections to `pihnotes.txt`
 
@@ -175,3 +241,6 @@ KV-backed Durable Objects are Paid features.
 - https://developers.cloudflare.com/durable-objects/platform/pricing/
 - https://developers.cloudflare.com/workers-ai/platform/pricing/
 - https://developers.cloudflare.com/browser-rendering/platform/pricing/
+- https://openrouter.ai/pricing
+- https://openrouter.ai/z-ai/glm-5.3-flash
+- https://openrouter.ai/docs/faq
