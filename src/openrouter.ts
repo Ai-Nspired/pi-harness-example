@@ -97,6 +97,16 @@ export function presetModelId(slug: string): string {
 }
 
 /**
+ * OpenRouter variants are suffixes: `:floor` (cheapest route), `:nitro`
+ * (fastest), `:exacto` (tool-calling reliability), `:free`, `:extended`. They
+ * change routing, not the catalogue entry, so metadata comes from the base id.
+ */
+export function baseModelId(id: string): string {
+  const variant = id.indexOf(":");
+  return variant > 0 ? id.slice(0, variant) : id;
+}
+
+/**
  * Presets carry their routing in OpenRouter, so this is only a fallback pin.
  * `samplingParams` are merged into an OpenAI-compatible request body as-is,
  * which is where OpenRouter reads `provider.order`.
@@ -153,12 +163,19 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
   const catalog = base.getModels();
   const configured = env.OPENROUTER_MODEL?.trim();
   const wanted = configured || DEFAULT_MODEL;
-  const known = catalog.find((model) => model.id === wanted);
+  const known = catalog.find((model) => model.id === wanted || model.id === baseModelId(wanted));
   // Only fall back to the catalogue head when nothing was asked for. An
   // explicit id the catalogue lacks gets its own entry, never a frontier model.
-  const baseModel = known ?? (configured ? offCatalogModel(wanted) : catalog[0]);
+  // A variant keeps its suffix so the request routes the way it was asked to.
+  const baseModel = known
+    ? { ...known, id: wanted }
+    : configured
+      ? offCatalogModel(wanted)
+      : catalog[0];
   if (!baseModel) return undefined;
-  const extra = known ? [] : [baseModel];
+  // Add the model when the catalogue does not already carry this exact id —
+  // including a variant, whose base entry exists but whose id does not.
+  const extra = known && known.id === wanted ? [] : [baseModel];
 
   const order = parseProviderOrder(env.OPENROUTER_PROVIDER_ORDER);
   const entries = parsePresetEntries(env.OPENROUTER_PRESETS);
@@ -167,7 +184,9 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
     // A preset pinned to a model borrows that model's metadata; otherwise the
     // metadata model stands in, since a preset cannot be fetched for it.
     const meta = entry.modelId
-      ? catalog.find((model) => model.id === entry.modelId) ?? offCatalogModel(entry.modelId)
+      ? catalog.find(
+          (model) => model.id === entry.modelId || model.id === baseModelId(entry.modelId!)
+        ) ?? offCatalogModel(entry.modelId)
       : baseModel;
     return withProviderOrder({ ...meta, id: entry.id, name: `OpenRouter ${entry.id}` }, order);
   });

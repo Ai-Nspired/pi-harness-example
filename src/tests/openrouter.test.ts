@@ -38,6 +38,12 @@ describe("preset entries", () => {
     ]);
   });
 
+  it("keeps a routing variant in the model id", () => {
+    expect(parsePresetEntries("z-ai/glm-5.3-flash:floor@preset/cheap")).toEqual([
+      { slug: "cheap", modelId: "z-ai/glm-5.3-flash:floor", id: "z-ai/glm-5.3-flash:floor@preset/cheap" }
+    ]);
+  });
+
   it("accepts the model@slug shorthand", () => {
     expect(parsePresetEntries("z-ai/glm-4.7@deep")).toEqual([
       { slug: "deep", modelId: "z-ai/glm-4.7", id: "z-ai/glm-4.7@preset/deep" }
@@ -78,6 +84,30 @@ describe("the OpenRouter provider", () => {
     expect(ids).toContain("@preset/fast");
     expect(ids).toContain("@preset/smart");
     expect(setup.defaultModelId).toBe("@preset/fast");
+  });
+
+  it("reads metadata from the base model behind a variant", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_PRESETS: "z-ai/glm-5.3-flash:floor@preset/cheap"
+    })!;
+
+    const cheap = setup.provider.getModels().find(
+      (model) => model.id === "z-ai/glm-5.3-flash:floor@preset/cheap"
+    );
+    expect(cheap?.contextWindow).toBe(1_048_575);
+    expect(setup.defaultModelId).toBe("z-ai/glm-5.3-flash:floor@preset/cheap");
+  });
+
+  it("keeps a variant on the configured default model", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_MODEL: "z-ai/glm-5.3-flash:floor"
+    })!;
+
+    expect(setup.defaultModelId).toBe("z-ai/glm-5.3-flash:floor");
+    const model = setup.provider.getModels().find((entry) => entry.id === "z-ai/glm-5.3-flash:floor");
+    expect(model?.contextWindow).toBe(1_048_575);
   });
 
   it("registers a preset pinned to a specific model", () => {
