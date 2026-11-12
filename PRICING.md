@@ -118,8 +118,9 @@ $0.03). Some listings quote $0.075 / $0.25 from a September 2026 promotion, and
 third-party aggregators quote figures as low as $0.034 / $0.083 — trust the
 OpenRouter model page for the route you actually get. Routing is not pinned by
 default, so pin a provider (`provider.order` or pricing sort) if the rate has to
-hold. Free models are capped at 20 requests/minute and 50/day (1,000/day after
-a lifetime $10 purchase) and are not suitable for a tool-calling harness.
+hold. Free-model capacity depends on **all-time credits purchased**, not on your
+current balance: below roughly $10 purchased you get 50 requests/day, at or
+above it 1,000/day, with 20 requests/minute either way.
 
 ### Observed spend beats token math
 
@@ -134,9 +135,13 @@ Opus 5.5 bills at **$4/M input, $20/M output, $0.20/M cached reads**, so one
 turn of the same size. Six of those is your dollar, and nothing else at your
 volume gets there.
 
-Free models have their own ceiling: 20 requests/minute and **50 requests/day**,
-rising to 1,000/day only after a lifetime $10 of credits. A harness running on
-`:free` variants hits that limit long before it costs anything.
+Free models have their own ceiling, and the tier is set by **all-time credits
+purchased**, not by the balance you keep: under about $10 purchased means 50
+requests/day, at or above it 1,000/day, and 20 requests/minute either way. A
+$15+ purchase history puts you on the 1,000/day tier, so a personal harness on
+`:free` variants is limited by tool support and provider queueing rather than
+by the daily cap. `GET /api/v1/key` reports the counter as
+`free_model_daily_requests` and the account flag as `is_free_tier`.
 
 **This repo does not call OpenRouter.** Inference goes over the `AI` binding to
 Workers AI, so OpenRouter credits are not spent by this assistant. If you are
