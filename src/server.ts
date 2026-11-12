@@ -7,13 +7,13 @@ import { createGitModule } from "@cloudflare/computer/modules/git";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { routeAgentRequest } from "agents";
-import { PiHarness } from "agents/harness/pi";
+import { PiHarness, ROOT_SESSION } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
 import { createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
-import { createOpenRouterSetup } from "./openrouter";
+import { createOpenRouterSetup, presetModelId } from "./openrouter";
 import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
@@ -193,8 +193,46 @@ export class PiAgent extends DurableObject<Env> {
     .use(this.webSockets)
     .use(this.harness);
 
+  /**
+   * pi applies `defaults` only when a session is first created, so a session
+   * opened before a preset was configured keeps its old model forever. This
+   * adopts the configured preset, which is why a stale conversation stops
+   * reporting (and running) a route nobody chose. Once the UI can pick a
+   * preset, this should only adopt when nothing valid is stored.
+   */
+  private async adoptConfiguredPreset(): Promise<void> {
+    const setup = this.openrouter;
+    if (!setup) return;
+    const allowed = new Set([
+      ...setup.presets.map((slug) => presetModelId(slug)),
+      setup.defaultModelId
+    ]);
+    const session = this.harness.session(ROOT_SESSION);
+    const stream = await session.events();
+    let stored: { provider?: string; id?: string } | undefined;
+    try {
+      const snapshot = stream.snapshot as {
+        agent?: { model?: { provider?: string; id?: string } };
+      };
+      stored = snapshot.agent?.model;
+    } finally {
+      await stream.stop();
+    }
+    if (stored?.provider === "openrouter" && stored.id && allowed.has(stored.id)) {
+      return;
+    }
+    await session.setModel({ provider: "openrouter", id: setup.defaultModelId });
+    console.log(
+      "preset adopted",
+      setup.defaultModelId,
+      "was",
+      stored ? `${stored.provider}/${stored.id}` : "unset"
+    );
+  }
+
   /** Host startup, after the harness has opened pi. */
   async onStart(): Promise<void> {
+    await this.adoptConfiguredPreset();
     // One line in the dashboard logs naming the provider actually in use.
     console.log(
       "model route",
@@ -208,6 +246,23 @@ export class PiAgent extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (new URL(request.url).pathname === "/api/route") {
+      // What this deployment is actually set up to run, readable from a phone:
+      // the model a new session starts on, and the presets it was given. The
+      // key itself is never echoed, only whether one is configured.
+      const setup = createOpenRouterSetup(env);
+      return Response.json(
+        {
+          model: setup?.defaultModelId ?? MODEL_ID,
+          provider: setup ? "openrouter" : "workers-ai",
+          presets: setup?.presets ?? [],
+          note: setup
+            ? undefined
+            : "OPENROUTER_API_KEY is not set, so presets are not used"
+        },
+        { headers: { "cache-control": "no-store" } }
+      );
+    }
     if (new URL(request.url).pathname === "/api/session") {
       // A fresh session id for the client to open its WebSocket against.
       return Response.json({ session: crypto.randomUUID() });

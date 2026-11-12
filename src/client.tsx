@@ -33,7 +33,38 @@ import { usePiSession } from "./use-pi-session";
 import "./styles.css";
 
 const SESSION_KEY = "pi-harness-session";
-const MODEL = "@cf/zai-org/glm-5.3-flash";
+/**
+ * The preset this Worker is actually configured to run. It asks the server
+ * rather than naming a model here, so the header cannot claim a route the
+ * session is not on.
+ */
+function RouteBadge() {
+  const [label, setLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetch("/api/route")
+      .then(async (response) => {
+        if (!response.ok) return undefined;
+        return (await response.json()) as { model?: string };
+      })
+      .then((route) => {
+        if (!live || !route?.model) return;
+        setLabel(route.model.split("/").at(-1) ?? route.model);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!label) return null;
+  return (
+    <Badge variant="secondary" className="hidden sm:inline-flex">
+      {label}
+    </Badge>
+  );
+}
 
 const SUGGESTIONS = [
   {
@@ -439,9 +470,7 @@ function App() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              <Badge variant="secondary" className="hidden sm:inline-flex">
-                {MODEL.split("/").at(-1)}
-              </Badge>
+              <RouteBadge />
               <Badge variant={connected ? "success" : "secondary"}>
                 {connected
                   ? "Live"
