@@ -11,6 +11,13 @@ server:
   limiter: false
   public_instance: false
 
+# DuckDuckGo's own engine timed out on every query we checked (2026-11-12), so
+# it only added latency: it never contributed a result. The web_search tool
+# still has DuckDuckGo's HTML and Lite endpoints as its own last resort.
+engines:
+  - name: duckduckgo
+    disabled: true
+
 search:
   safe_search: 0
   # `json` is what the web_search tool calls. SearXNG ships with html only,
