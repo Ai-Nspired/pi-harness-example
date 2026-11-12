@@ -12,6 +12,7 @@ import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
 import { createWebSearchExtension } from "./extensions/web-search";
+import { compactionBudget } from "./compaction";
 import { createOpenRouterSetup } from "./openrouter";
 import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
@@ -101,7 +102,10 @@ export class PiAgent extends DurableObject<Env> {
           settings: {
             // pi doubles the delay before each retry: 1, 2, 4, 8 and 16 seconds,
             // so a rate-limited model gets about 30 seconds to recover.
-            retry: { enabled: true, maxRetries: 5, baseDelayMs: 1000 }
+            retry: { enabled: true, maxRetries: 5, baseDelayMs: 1000 },
+            // Cap the working context so a long session summarises older turns
+            // instead of resending everything it has ever said, every turn.
+            compaction: compactionBudget(this.defaultModel().contextWindow)
           },
           onReport: (error) => console.warn("pi report", error)
         },
