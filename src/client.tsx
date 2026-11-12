@@ -379,9 +379,6 @@ function App() {
     () => window.matchMedia("(min-width: 1100px)").matches
   );
   const endRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLElement>(null);
-  /** False once the reader has scrolled away from the end of the transcript. */
-  const pinned = useRef(true);
   const {
     status,
     messages,
@@ -397,22 +394,9 @@ function App() {
   } = usePiSession(session);
   const runningTools = running_.map((tool) => tool.name);
 
-  // Follow the transcript, but only while the reader is already at the end.
-  // Position is set directly: `scrollIntoView` re-anchors the scroller while
-  // tokens stream in, which fought the thumb and read as scrolling backwards.
   useEffect(() => {
-    const element = scrollRef.current;
-    if (!element || !pinned.current) return;
-    element.scrollTop = element.scrollHeight;
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, live, running]);
-
-  const onScroll = () => {
-    const element = scrollRef.current;
-    if (!element) return;
-    pinned.current =
-      element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-  };
-
 
   const connected = status === "open";
 
@@ -485,12 +469,7 @@ function App() {
           </div>
         </header>
 
-        <main
-          ref={scrollRef}
-          onScroll={onScroll}
-          className="min-h-0 flex-1 overflow-y-auto"
-          style={{ overflowAnchor: "none", overscrollBehavior: "contain" }}
-        >
+        <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
             {empty ? (
               <div className="py-10 sm:py-16">
