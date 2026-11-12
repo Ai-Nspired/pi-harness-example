@@ -35,6 +35,12 @@ configuration.
 `wrangler.jsonc` carries the four non-secret values with empty defaults, so a
 deploy never needs a key in the repository.
 
+`OPENROUTER_MODEL` accepts any OpenRouter model id, including one newer than the
+catalogue bundled with pi-ai. An id the catalogue does not know is registered
+with conservative defaults (128k context, 8k output, cost reported as zero)
+rather than being silently replaced by catalogue entry zero — which is a
+frontier model, and an expensive surprise.
+
 ## What the Worker sends
 
 For a preset, the request body is an ordinary chat completion whose model is the

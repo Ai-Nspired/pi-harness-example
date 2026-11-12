@@ -79,15 +79,20 @@ describe("the OpenRouter provider", () => {
     expect(setup.defaultModelId).toBe("z-ai/glm-5.3-flash");
   });
 
-  it("falls back to a catalog model when the configured model is unknown", () => {
+  it("registers a model the catalogue does not know instead of routing elsewhere", () => {
     const setup = createOpenRouterSetup({
       OPENROUTER_API_KEY: "test-key",
-      OPENROUTER_MODEL: "nope/nope"
+      OPENROUTER_MODEL: "inclusionai/ling-3.0-tiny"
     })!;
 
     const ids = setup.provider.getModels().map((model) => model.id);
-    expect(setup.defaultModelId).not.toBe("nope/nope");
-    expect(ids).toContain(setup.defaultModelId);
+    expect(setup.defaultModelId).toBe("inclusionai/ling-3.0-tiny");
+    expect(ids).toContain("inclusionai/ling-3.0-tiny");
+  });
+
+  it("uses the catalogue head when no model is configured at all", () => {
+    const setup = createOpenRouterSetup({ OPENROUTER_API_KEY: "test-key" })!;
+    expect(setup.provider.getModels().map((model) => model.id)).toContain(setup.defaultModelId);
   });
 
   it("pins the provider order from configuration", () => {

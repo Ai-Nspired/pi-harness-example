@@ -66,6 +66,26 @@ export function withProviderOrder<TApi extends Api>(
   };
 }
 
+/**
+ * A model the bundled catalogue does not know yet. Naming one explicitly must
+ * not fall back to catalogue entry zero, which is a frontier model: build a
+ * conservative entry for the requested id instead.
+ */
+export function offCatalogModel(id: string): Model<"openai-completions"> {
+  return {
+    id,
+    name: id,
+    api: "openai-completions",
+    provider: "openrouter",
+    baseUrl: OPENROUTER_BASE_URL,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    reasoning: false,
+    contextWindow: 131_072,
+    maxTokens: 8_192
+  };
+}
+
 export interface OpenRouterSetup {
   provider: Provider<"anthropic-messages" | "openai-completions">;
   /** Slugs from `OPENROUTER_PRESETS`, in order, without the prefix. */
@@ -85,9 +105,14 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
 
   const base = openrouterProvider();
   const catalog = base.getModels();
-  const wanted = env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL;
-  const baseModel = catalog.find((model) => model.id === wanted) ?? catalog[0];
+  const configured = env.OPENROUTER_MODEL?.trim();
+  const wanted = configured || DEFAULT_MODEL;
+  const known = catalog.find((model) => model.id === wanted);
+  // Only fall back to the catalogue head when nothing was asked for. An
+  // explicit id the catalogue lacks gets its own entry, never a frontier model.
+  const baseModel = known ?? (configured ? offCatalogModel(wanted) : catalog[0]);
   if (!baseModel) return undefined;
+  const extra = known ? [] : [baseModel];
 
   const order = parseProviderOrder(env.OPENROUTER_PROVIDER_ORDER);
   const presets = parsePresetSlugs(env.OPENROUTER_PRESETS);
@@ -109,7 +134,7 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
         resolve: async () => ({ auth: { apiKey: key }, source: "OPENROUTER_API_KEY" })
       }
     },
-    getModels: () => [...base.getModels(), ...presetModels]
+    getModels: () => [...base.getModels(), ...extra, ...presetModels]
   };
 
   const requested = env.OPENROUTER_DEFAULT_PRESET?.trim().replace(/^@preset\//, "");
