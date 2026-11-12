@@ -117,6 +117,51 @@ function ModeToggle() {
   );
 }
 
+/**
+ * The preset switch. The server names the presets it will accept, and the
+ * active one comes from the session's stored model, so this shows the preset
+ * the next reply will actually run on.
+ */
+function PresetToggle({
+  presets,
+  current,
+  onPick
+}: {
+  presets: readonly string[];
+  current: string | null;
+  onPick: (slug: string) => void;
+}) {
+  if (presets.length === 0) return null;
+  return (
+    <div className="shrink-0 border-b border-kumo-line bg-kumo-base">
+      <div
+        role="group"
+        aria-label="Preset"
+        className="mx-auto flex max-w-3xl items-center gap-1.5 overflow-x-auto px-5 py-2"
+      >
+        {presets.map((slug) => {
+          const active = slug === current;
+          return (
+            <button
+              key={slug}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onPick(slug)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                active
+                  ? "border-transparent bg-kumo-brand text-white"
+                  : "border-kumo-line bg-kumo-base text-kumo-subtle hover:text-kumo-default"
+              }`}
+            >
+              {slug}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-40 overflow-auto rounded-lg bg-kumo-elevated p-2.5 text-xs leading-5 whitespace-pre-wrap break-words">
@@ -420,6 +465,9 @@ function App() {
     queued,
     retry,
     error,
+    model,
+    presets,
+    setPreset,
     submit: submitPrompt,
     abort
   } = usePiSession(session);
@@ -497,6 +545,12 @@ function App() {
             </div>
           </div>
         </header>
+
+        <PresetToggle
+          presets={presets}
+          current={model?.modelId.replace(/^@preset\//, "") ?? null}
+          onPick={setPreset}
+        />
 
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">

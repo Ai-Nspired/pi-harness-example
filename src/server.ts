@@ -185,8 +185,11 @@ export class PiAgent extends DurableObject<Env> {
   }
 
   // App glue, not the harness: how this app puts sessions on a socket.
-  readonly sockets = new PiSessionSockets(this.harness, this.registry, (tag) =>
-    this.ctx.getWebSockets(tag)
+  readonly sockets = new PiSessionSockets(
+    this.harness,
+    this.registry,
+    (tag) => this.ctx.getWebSockets(tag),
+    this.openrouter?.entries ?? []
   );
   readonly webSockets = new WebSockets(this.sockets.options());
   readonly lifecycle = Lifecycle.install(this)

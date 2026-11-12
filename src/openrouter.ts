@@ -191,6 +191,23 @@ export interface OpenRouterSetup {
   presets: readonly string[];
   /** Model id to start a session with, already prefixed when it is a preset. */
   defaultModelId: string;
+  /** The configured entries, each with the id a switch must send. */
+  entries: readonly PresetEntry[];
+}
+
+/**
+ * The model id to send when switching to one configured preset. Accepts the
+ * bare slug or the prefixed id, and answers with the id as registered — the
+ * prefixed slug, or the `model@preset/slug` form when the entry pins a model.
+ * Undefined for a slug that is not configured, so the caller can refuse it
+ * before it reaches OpenRouter as an unknown model.
+ */
+export function resolvePresetModel(
+  entries: readonly PresetEntry[],
+  slug: string
+): string | undefined {
+  const wanted = slug.trim().replace(/^@preset\//, "");
+  return entries.find((entry) => entry.slug === wanted || entry.id === slug.trim())?.id;
 }
 
 /**
@@ -278,5 +295,5 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
   // the first configured preset, or the metadata model picked above.
   const defaultModelId = matched?.id ?? presetModels[0]?.id ?? baseModel.id;
 
-  return { provider, presets, defaultModelId };
+  return { provider, presets, defaultModelId, entries };
 }

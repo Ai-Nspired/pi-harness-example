@@ -113,6 +113,26 @@ describe("the session WebSocket protocol", () => {
     socket.close();
   });
 
+  it("refuses a preset that is not configured", async () => {
+    const name = crypto.randomUUID();
+    const socket = await connect(name);
+    const client = follow(socket);
+    await client.until(() =>
+      client.frames.some((frame) => frame.type === "events")
+    );
+
+    socket.send(JSON.stringify({ type: "setModel", id: "m1", preset: "truth" }));
+    await client.until(() =>
+      client.frames.some((frame) => frame.type === "error")
+    );
+
+    expect(client.frames.find((frame) => frame.type === "error")).toMatchObject({
+      id: "m1",
+      message: expect.stringContaining("Unknown preset")
+    });
+    socket.close();
+  });
+
   it("keeps serving a hibernated socket after the object is evicted", async () => {
     const name = crypto.randomUUID();
     const stub = env.PI_HARNESS_TEST.getByName(name);

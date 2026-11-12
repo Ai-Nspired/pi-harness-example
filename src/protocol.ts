@@ -24,6 +24,12 @@ export type PiClientMessage =
     }
   | { readonly type: "abort"; readonly id?: string }
   | { readonly type: "reset"; readonly id?: string; readonly handoff?: string }
+  /** Switch this session to a configured preset, by its slug. */
+  | {
+      readonly type: "setModel";
+      readonly id?: string;
+      readonly preset: string;
+    }
   /** Ask for a fresh snapshot. */
   | { readonly type: "resync"; readonly id?: string };
 
@@ -33,6 +39,8 @@ export type PiServerMessage =
       readonly type: "hello";
       readonly session: PiSessionId;
       readonly tools: readonly PiToolInfo[];
+      /** Preset slugs this session may switch to. */
+      readonly presets: readonly string[];
     }
   /**
    * pi's own agent events for the connection's session. The first batch of a

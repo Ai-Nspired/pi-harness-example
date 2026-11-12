@@ -15,12 +15,15 @@ type State = SessionView & {
   readonly status: ConnectionStatus;
   /** Every registered tool, from the server's hello. */
   readonly catalog: readonly ToolInfo[];
+  /** Preset slugs the server will accept a switch to, from its hello. */
+  readonly presets: readonly string[];
 };
 
 const INITIAL_STATE: State = {
   ...EMPTY_VIEW,
   status: "connecting",
-  catalog: []
+  catalog: [],
+  presets: []
 };
 
 /**
@@ -57,7 +60,11 @@ export function usePiSession(object: string) {
       outbox.receive(message);
       switch (message.type) {
         case "hello":
-          setState((current) => ({ ...current, catalog: message.tools }));
+          setState((current) => ({
+            ...current,
+            catalog: message.tools,
+            presets: message.presets
+          }));
           return;
         case "events":
           setState((current) => ({
@@ -114,5 +121,16 @@ export function usePiSession(object: string) {
     [send]
   );
 
-  return { ...state, submit, abort, reset };
+  /**
+   * Switch the session to a configured preset. The stored choice comes back as
+   * pi's `agent_changed` event, so `model` in this state is the truth, not the
+   * value that was asked for.
+   */
+  const setPreset = useCallback(
+    (preset: string) =>
+      send({ type: "setModel", id: crypto.randomUUID(), preset }),
+    [send]
+  );
+
+  return { ...state, submit, abort, reset, setPreset };
 }

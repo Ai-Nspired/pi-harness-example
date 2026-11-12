@@ -7,6 +7,7 @@ import {
   parsePresetSlugs,
   parseProviderOrder,
   presetModelId,
+  resolvePresetModel,
   withProviderOrder,
   withProviderPin
 } from "../openrouter";
@@ -233,5 +234,18 @@ describe("the OpenRouter provider", () => {
     const setup = createOpenRouterSetup({ OPENROUTER_API_KEY: "secret-key" })!;
     const resolved = await setup.provider.auth.apiKey?.resolve({} as never);
     expect(resolved?.auth).toEqual({ apiKey: "secret-key" });
+  });
+});
+
+describe("resolving a preset for the toggle", () => {
+  it("returns the configured model id, and refuses an unknown slug", () => {
+    const entries = parsePresetEntries("truth, z-ai/glm-4.7@preset/cheap");
+
+    expect(resolvePresetModel(entries, "truth")).toBe("@preset/truth");
+    expect(resolvePresetModel(entries, "@preset/truth")).toBe("@preset/truth");
+    expect(resolvePresetModel(entries, "@preset/cheap")).toBe(
+      "z-ai/glm-4.7@preset/cheap"
+    );
+    expect(resolvePresetModel(entries, "missing")).toBeUndefined();
   });
 });
