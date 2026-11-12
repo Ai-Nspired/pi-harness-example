@@ -54,5 +54,15 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
   (`src/agent-protocol.ts`): `POST /api/assistant`, `GET /api/agent-card`,
   `x-agent`, `x-agent-protocol`, `x-agent-request-id`. This Worker is `op`, and
   `call_agent` reaches the service bindings it is given.
+- The Truth Engine (`i.nspired.cc/engine`) speaks orproxy's audit contract:
+  `POST /v1/audit` → SSE `choices[0].delta.content`, `POST /v1/audit/store` and
+  `GET /v1/audit/<id>` for the saved record. `src/audit.ts` and the `/v1/*`
+  route answer in that shape here, on the `truth` preset, so the engine's base URL
+  is the only thing that has to change to have op do the thinking. Saved
+  records are still proxied to `ORPROXY`; the audit session is keyed on the
+  first user message, not on `audit_id` (the engine only learns that after it
+  stores the first answer).
+- `/v1/*` is in `assets.run_worker_first`; a new API prefix must be added there
+  too, or the static assets answer it first.
 - `pnpm-lock.yaml` is committed; `agents` is pinned to the 0.32 series because
   newer releases peer against pi 1.5 while the pi packages are pinned to 1.4.0.

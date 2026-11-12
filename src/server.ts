@@ -19,6 +19,15 @@ import {
   responseHeaders,
   successBody
 } from "./agent-protocol";
+import {
+  AUDIT_CORS,
+  AUDIT_PRESET,
+  auditError,
+  auditSession,
+  auditStreamBody,
+  lastUserMessage,
+  parseAuditRequest
+} from "./audit";
 import { createAgentExtension } from "./extensions/agents";
 import { extractDocument, uploadName } from "./extract";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
@@ -344,6 +353,102 @@ export class PiAgent extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === "/v1/audit" || pathname.startsWith("/v1/audit/")) {
+      // The Truth Engine's brain. The engine posts a conversation and reads
+      // OpenAI-shaped deltas; op answers on the `truth` preset, in a session
+      // derived from the first message, so the docket read on turn one is
+      // still in context on turn five. Only the thinking moves here: saved
+      // records stay in orproxy, which the engine already links to.
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: AUDIT_CORS });
+      }
+      if (pathname === "/v1/audit") {
+        if (request.method !== "POST") {
+          return auditError(405, "method_not_allowed", "POST the conversation");
+        }
+        let raw: unknown;
+        try {
+          raw = await request.json();
+        } catch {
+          return auditError(400, "invalid_request", "Expected a JSON body");
+        }
+        const parsed = parseAuditRequest(raw);
+        if (!parsed.ok) return auditError(400, "invalid_request", parsed.message);
+
+        // Without a key there are no presets to name; the harness falls back
+        // to Workers AI on its own, so the audit still answers.
+        const setup = createOpenRouterSetup(env);
+        let preset: string | undefined = parsed.request.preset ?? AUDIT_PRESET;
+        if (setup) {
+          if (!resolvePresetModel(setup.entries, preset)) {
+            return auditError(
+              400,
+              "unknown_preset",
+              `Unknown preset ${JSON.stringify(preset)}. Configured: ${
+                setup.presets.join(", ") || "none"
+              }`
+            );
+          }
+        } else {
+          preset = undefined;
+        }
+
+        const session = await auditSession(parsed.request.messages);
+        const message = lastUserMessage(parsed.request.messages);
+        try {
+          const answer = await env.PiAgent.getByName(session).ask(message, preset);
+          console.log("audit answered", {
+            session,
+            preset: preset ?? "workers-ai",
+            audit: parsed.request.audit_id ?? null,
+            characters: answer.text.length
+          });
+          return new Response(auditStreamBody(answer.text, answer.model), {
+            headers: {
+              ...AUDIT_CORS,
+              "content-type": "text/event-stream; charset=utf-8",
+              "cache-control": "no-store"
+            }
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error("audit failed", { session, message: detail });
+          return auditError(502, "audit_failed", detail);
+        }
+      }
+
+      // `/v1/audit/store` and `/v1/audit/<id>`: pass through to orproxy, so a
+      // saved docket and its permalink keep working exactly as before.
+      const orproxy = serviceBindings(env)["ORPROXY"];
+      if (!orproxy) {
+        return auditError(503, "unavailable", "This deployment has no ORPROXY binding");
+      }
+      try {
+        const search = new URL(request.url).search;
+        const body =
+          request.method === "GET" || request.method === "HEAD"
+            ? undefined
+            : await request.arrayBuffer();
+        const upstream = await orproxy.fetch(
+          new Request(`https://orproxy${pathname}${search}`, {
+            method: request.method,
+            headers: request.headers,
+            body
+          })
+        );
+        const headers = new Headers(upstream.headers);
+        for (const [name, value] of Object.entries(AUDIT_CORS)) headers.set(name, value);
+        headers.set("cache-control", "no-store");
+        return new Response(upstream.body, { status: upstream.status, headers });
+      } catch (error) {
+        return auditError(
+          502,
+          "audit_store_failed",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
     if (new URL(request.url).pathname === "/api/transcribe") {
       // Dictation: the browser posts the recording, Whisper turns it into text.
       if (request.method === "GET") {
