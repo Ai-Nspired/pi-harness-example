@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import {
   createOpenRouterSetup,
+  parsePresetEntries,
   parsePresetSlugs,
   parseProviderOrder,
   presetModelId,
@@ -23,6 +24,29 @@ describe("preset slugs", () => {
 
   it("parses a provider order", () => {
     expect(parseProviderOrder(" Wafer, Z.ai ,")).toEqual(["Wafer", "Z.ai"]);
+  });
+});
+
+describe("preset entries", () => {
+  it("accepts the bare form", () => {
+    expect(parsePresetEntries("fast")).toEqual([{ slug: "fast", id: "@preset/fast" }]);
+  });
+
+  it("accepts a preset pinned to a model", () => {
+    expect(parsePresetEntries("z-ai/glm-5.3-flash@preset/smart")).toEqual([
+      { slug: "smart", modelId: "z-ai/glm-5.3-flash", id: "z-ai/glm-5.3-flash@preset/smart" }
+    ]);
+  });
+
+  it("accepts the model@slug shorthand", () => {
+    expect(parsePresetEntries("z-ai/glm-4.7@deep")).toEqual([
+      { slug: "deep", modelId: "z-ai/glm-4.7", id: "z-ai/glm-4.7@preset/deep" }
+    ]);
+  });
+
+  it("keeps distinct pinned models for the same slug", () => {
+    const entries = parsePresetEntries("a@preset/x, b@preset/x");
+    expect(entries.map((entry) => entry.id)).toEqual(["a@preset/x", "b@preset/x"]);
   });
 });
 
@@ -56,6 +80,19 @@ describe("the OpenRouter provider", () => {
     expect(setup.defaultModelId).toBe("@preset/fast");
   });
 
+  it("registers a preset pinned to a specific model", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_PRESETS: "z-ai/glm-5.3-flash@preset/smart"
+    })!;
+
+    const pinned = setup.provider.getModels().find(
+      (model) => model.id === "z-ai/glm-5.3-flash@preset/smart"
+    );
+    expect(setup.defaultModelId).toBe("z-ai/glm-5.3-flash@preset/smart");
+    expect(pinned?.contextWindow).toBe(1_048_575);
+  });
+
   it("honours the requested default preset", () => {
     const setup = createOpenRouterSetup({
       OPENROUTER_API_KEY: "test-key",
@@ -63,6 +100,15 @@ describe("the OpenRouter provider", () => {
       OPENROUTER_DEFAULT_PRESET: "@preset/smart"
     })!;
     expect(setup.defaultModelId).toBe("@preset/smart");
+  });
+
+  it("selects a pinned preset by its bare slug", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_PRESETS: "z-ai/glm-5.3-flash@preset/smart",
+      OPENROUTER_DEFAULT_PRESET: "smart"
+    })!;
+    expect(setup.defaultModelId).toBe("z-ai/glm-5.3-flash@preset/smart");
   });
 
   it("ignores a default preset that is not configured", () => {

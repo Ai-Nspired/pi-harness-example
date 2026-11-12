@@ -25,17 +25,63 @@ export interface OpenRouterEnv {
   OPENROUTER_MODEL?: string;
 }
 
+/**
+ * One configured preset. OpenRouter accepts a preset three ways: as the whole
+ * model id (`@preset/slug`), pinned to an explicit model
+ * (`model-id@preset/slug`), or as a separate `preset` field. This repo uses the
+ * model-id forms, because they keep one code path and survive logging.
+ */
+export interface PresetEntry {
+  readonly slug: string;
+  /** Model the preset is applied to, when the entry pins one. */
+  readonly modelId?: string;
+  /** The model id to register, already carrying the preset. */
+  readonly id: string;
+}
+
+/**
+ * `"fast, z-ai/glm-5.3-flash@preset/smart, z-ai/glm-4.7@deep"` → three entries.
+ * A bare `@preset/` prefix is accepted and stripped, as is a duplicated slug.
+ */
+export function parsePresetEntries(raw: string | undefined): PresetEntry[] {
+  const seen = new Set<string>();
+  const entries: PresetEntry[] = [];
+
+  for (const part of (raw ?? "").split(",")) {
+    const text = part.trim();
+    if (text.length === 0) continue;
+
+    const presetAt = text.indexOf("@preset/");
+    let modelId: string | undefined;
+    let slug: string;
+
+    if (presetAt >= 0) {
+      modelId = text.slice(0, presetAt).trim() || undefined;
+      slug = text.slice(presetAt + "@preset/".length);
+    } else if (text.includes("@")) {
+      // `model@slug` shorthand for the same thing.
+      const at = text.indexOf("@");
+      modelId = text.slice(0, at).trim() || undefined;
+      slug = text.slice(at + 1);
+    } else {
+      slug = text;
+    }
+
+    slug = slug.trim().replace(/\/+$/, "");
+    if (slug.length === 0) continue;
+
+    const id = modelId ? `${modelId}${PRESET_PREFIX}${slug}` : presetModelId(slug);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    entries.push({ slug, ...(modelId ? { modelId } : {}), id });
+  }
+
+  return entries;
+}
+
 /** `"fast, @preset/smart , fast"` → `["fast", "smart"]`. */
 export function parsePresetSlugs(raw: string | undefined): string[] {
-  const seen = new Set<string>();
-  const slugs: string[] = [];
-  for (const part of (raw ?? "").split(",")) {
-    const slug = part.trim().replace(/^@preset\//, "").replace(/\/+$/, "");
-    if (slug.length === 0 || seen.has(slug)) continue;
-    seen.add(slug);
-    slugs.push(slug);
-  }
-  return slugs;
+  return parsePresetEntries(raw).map((entry) => entry.slug);
 }
 
 /** `" Wafer , Z.ai "` → `["Wafer", "Z.ai"]`. */
@@ -115,13 +161,18 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
   const extra = known ? [] : [baseModel];
 
   const order = parseProviderOrder(env.OPENROUTER_PROVIDER_ORDER);
-  const presets = parsePresetSlugs(env.OPENROUTER_PRESETS);
-  const presetModels = presets.map((slug) =>
-    withProviderOrder(
-      { ...baseModel, id: presetModelId(slug), name: `OpenRouter ${slug}` },
-      order
-    )
-  );
+  const entries = parsePresetEntries(env.OPENROUTER_PRESETS);
+  const presets = entries.map((entry) => entry.slug);
+  const presetModels = entries.map((entry) => {
+    // A preset pinned to a model borrows that model's metadata; otherwise the
+    // metadata model stands in, since a preset cannot be fetched for it.
+    const meta = entry.modelId
+      ? catalog.find((model) => model.id === entry.modelId) ?? offCatalogModel(entry.modelId)
+      : baseModel;
+    return withProviderOrder({ ...meta, id: entry.id, name: `OpenRouter ${entry.id}` }, order);
+  });
+  // Registered ids the catalogue does not already carry, including presets.
+  const added = [...extra, ...presetModels];
 
   const login = base.auth.apiKey?.login;
   const provider: OpenRouterSetup["provider"] = {
@@ -134,16 +185,17 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
         resolve: async () => ({ auth: { apiKey: key }, source: "OPENROUTER_API_KEY" })
       }
     },
-    getModels: () => [...base.getModels(), ...extra, ...presetModels]
+    getModels: () => [...base.getModels(), ...added]
   };
 
-  const requested = env.OPENROUTER_DEFAULT_PRESET?.trim().replace(/^@preset\//, "");
+  // Accept a slug, `@preset/slug`, or the fully pinned model id.
+  const requested = env.OPENROUTER_DEFAULT_PRESET?.trim();
+  const matched = requested
+    ? entries.find((entry) => entry.id === requested || entry.slug === requested.replace(/^@preset\//, ""))
+    : undefined;
   // Always a model this provider can actually resolve: the requested preset,
   // the first configured preset, or the metadata model picked above.
-  const defaultModelId =
-    requested && presets.includes(requested)
-      ? presetModelId(requested)
-      : presetModels[0]?.id ?? baseModel.id;
+  const defaultModelId = matched?.id ?? presetModels[0]?.id ?? baseModel.id;
 
   return { provider, presets, defaultModelId };
 }

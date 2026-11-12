@@ -27,7 +27,7 @@ configuration.
 | Variable | Kind | Meaning |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | secret | Your OpenRouter key. Without it, the Worker uses Workers AI and presets are ignored. |
-| `OPENROUTER_PRESETS` | var | Comma-separated slugs you created, e.g. `fast, smart, deep`. Each becomes `openrouter/@preset/<slug>`. |
+| `OPENROUTER_PRESETS` | var | Comma-separated preset entries, e.g. `fast, smart, z-ai/glm-4.7@preset/deep`. See the three forms below. |
 | `OPENROUTER_DEFAULT_PRESET` | var | Slug a new session starts on. Falls back to the first configured preset. |
 | `OPENROUTER_PROVIDER_ORDER` | var | Optional fallback pin, e.g. `Wafer, Z.ai`. Presets are the primary place for routing. |
 | `OPENROUTER_MODEL` | var | Model whose metadata (context window, price) preset models inherit. Default `z-ai/glm-5.3-flash`. |
@@ -40,6 +40,22 @@ catalogue bundled with pi-ai. An id the catalogue does not know is registered
 with conservative defaults (128k context, 8k output, cost reported as zero)
 rather than being silently replaced by catalogue entry zero — which is a
 frontier model, and an expensive surprise.
+
+## Three ways to address a preset
+
+OpenRouter documents three, and this repo supports the two model-id forms:
+
+| Form | Example | Registered as |
+| --- | --- | --- |
+| Bare preset | `fast` | `@preset/fast` |
+| Preset pinned to a model | `z-ai/glm-4.7@preset/deep` | the same string |
+| `model@slug` shorthand | `z-ai/glm-4.7@deep` | `z-ai/glm-4.7@preset/deep` |
+
+The third documented form — a separate `preset` field in the request body —
+would need a second code path for the same result, so it is not used here. The
+pinned form matters when a preset is defined for one model: its metadata then
+comes from that model rather than from `OPENROUTER_MODEL`, so context window and
+price are right.
 
 ## What the Worker sends
 
