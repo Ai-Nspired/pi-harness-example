@@ -3,6 +3,8 @@ import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 
 /** How long one backend may take before the next one is tried. */
 const DEFAULT_TIMEOUT_MS = 10_000;
+/** SearXNG gets longer: a sleeping instance answers 503 until it finishes booting. */
+const DEFAULT_SEARXNG_TIMEOUT_MS = 25_000;
 /** Results returned when the model does not ask for a count. */
 const DEFAULT_RESULTS = 5;
 /** The most results one call may ask for. */
@@ -50,6 +52,8 @@ export interface WebSearchOptions {
   defaultResults?: number;
   /** Deadline for one backend, in milliseconds. */
   timeoutMs?: number;
+  /** Deadline for SearXNG alone, which may have to boot first. */
+  searxngTimeoutMs?: number;
   /** Replaced in tests; defaults to the global `fetch`. */
   fetch?: typeof fetch;
   /** Replaces the prompt section; `false` installs the tool without one. */
@@ -122,6 +126,12 @@ interface SearchFilters {
 
 export interface Provider {
   name: string;
+  /**
+   * Deadline for this backend alone. SearXNG needs a long one: a free instance
+   * that has gone to sleep answers 503 until it finishes booting, and a deadline
+   * shorter than that boot turns every first search into a fallback.
+   */
+  timeoutMs?: number;
   search(
     query: string,
     limit: number,
@@ -358,6 +368,7 @@ function createSearxngProvider(
 ): Provider {
   return {
     name: "searxng",
+    timeoutMs: options.searxngTimeoutMs ?? DEFAULT_SEARXNG_TIMEOUT_MS,
     async search(query, limit, signal, filters) {
       let endpoint: URL;
       try {
@@ -623,7 +634,8 @@ export function createWebSearchExtension(
           errors.push(`${provider.name}: skipped after a rate limit`);
           continue;
         }
-        const timeout = AbortSignal.timeout(timeoutMs);
+        const deadline = provider.timeoutMs ?? timeoutMs;
+        const timeout = AbortSignal.timeout(deadline);
         const signal = context.abortSignal
           ? AbortSignal.any([context.abortSignal, timeout])
           : timeout;
@@ -647,7 +659,7 @@ export function createWebSearchExtension(
           if (context.abortSignal?.aborted) throw error;
           const message =
             error instanceof Error && error.name === "TimeoutError"
-              ? `did not answer within ${timeoutMs} ms`
+              ? `did not answer within ${deadline} ms`
               : error instanceof Error
                 ? error.message
                 : String(error);
