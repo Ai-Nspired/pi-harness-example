@@ -113,8 +113,12 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
   };
 
   const requested = env.OPENROUTER_DEFAULT_PRESET?.trim().replace(/^@preset\//, "");
+  // Always a model this provider can actually resolve: the requested preset,
+  // the first configured preset, or the metadata model picked above.
   const defaultModelId =
-    requested && presets.includes(requested) ? presetModelId(requested) : presetModels[0]?.id ?? wanted;
+    requested && presets.includes(requested)
+      ? presetModelId(requested)
+      : presetModels[0]?.id ?? baseModel.id;
 
   return { provider, presets, defaultModelId };
 }

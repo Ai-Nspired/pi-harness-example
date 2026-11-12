@@ -79,6 +79,17 @@ describe("the OpenRouter provider", () => {
     expect(setup.defaultModelId).toBe("z-ai/glm-5.3-flash");
   });
 
+  it("falls back to a catalog model when the configured model is unknown", () => {
+    const setup = createOpenRouterSetup({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_MODEL: "nope/nope"
+    })!;
+
+    const ids = setup.provider.getModels().map((model) => model.id);
+    expect(setup.defaultModelId).not.toBe("nope/nope");
+    expect(ids).toContain(setup.defaultModelId);
+  });
+
   it("pins the provider order from configuration", () => {
     const setup = createOpenRouterSetup({
       OPENROUTER_API_KEY: "test-key",

@@ -123,8 +123,12 @@ export class PiAgent extends DurableObject<Env> {
   /** Start on the configured preset, or on Workers AI when there is no key. */
   private defaultModel() {
     if (this.openrouter) {
-      const preset = this.openModels().getModel("openrouter", this.openrouter.defaultModelId);
-      if (preset) return preset;
+      // Never return a Workers AI model here: the registry is OpenRouter's, so
+      // a model from the other provider could not be streamed at all.
+      const chosen = this.openModels().getModel("openrouter", this.openrouter.defaultModelId);
+      if (chosen) return chosen;
+      const first = this.openrouter.provider.getModels()[0];
+      if (first) return first;
     }
     return this.ai(MODEL_ID);
   }
@@ -140,6 +144,13 @@ export class PiAgent extends DurableObject<Env> {
 
   /** Host startup, after the harness has opened pi. */
   async onStart(): Promise<void> {
+    // One line in the dashboard logs naming the provider actually in use.
+    console.log(
+      "model route",
+      this.openrouter ? `openrouter:${this.openrouter.defaultModelId}` : "workers-ai",
+      "presets",
+      this.openrouter?.presets ?? []
+    );
     await this.sockets.reattach();
   }
 }
