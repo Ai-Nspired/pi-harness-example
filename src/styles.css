@@ -26,6 +26,14 @@ body {
   touch-action: manipulation;
 }
 
+/* The transcript follows its own end from script. Browser scroll anchoring
+   would shift the content under the reader while tokens stream in, which is
+   what made a drag fight the view. */
+.chat-scroll {
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+}
+
 /* The notch and home indicator sit over the page with `viewport-fit=cover`. */
 .app-shell {
   padding-top: env(safe-area-inset-top);

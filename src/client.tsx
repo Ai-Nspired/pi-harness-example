@@ -398,11 +398,13 @@ function App() {
   } = usePiSession(session);
   const runningTools = running_.map((tool) => tool.name);
 
-  // Follow the transcript, but only while the reader is already at the end,
-  // and instantly: one smooth scroll per streamed token was the visible shake.
+  // Follow the transcript, but only while the reader is already at the end.
+  // Position is set directly: `scrollIntoView` re-anchors the scroller while
+  // tokens stream in, which fought the thumb and read as scrolling backwards.
   useEffect(() => {
-    if (!pinned.current) return;
-    endRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+    const element = scrollRef.current;
+    if (!element || !pinned.current) return;
+    element.scrollTop = element.scrollHeight;
   }, [messages, live, running]);
 
   const onScroll = () => {
@@ -522,7 +524,7 @@ function App() {
         <main
           ref={scrollRef}
           onScroll={onScroll}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="chat-scroll min-h-0 flex-1 overflow-y-auto"
         >
           <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
             {empty ? (
