@@ -5,6 +5,8 @@ interface __BaseEnv_Env {
   AI: Ai;
   BROWSER: Fetcher;
   SEARXNG_URL: string;
+  CLOUDFLARE_SEARCH?: string;
+  AI_GATEWAY_ID?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_PRESETS?: string;
   OPENROUTER_DEFAULT_PRESET?: string;

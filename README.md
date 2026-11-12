@@ -220,12 +220,20 @@ local runs), for a self-hosted or public instance whose `settings.yml` lists
 (`https://searing-render.onrender.com`), which serves the JSON API, so search
 does not depend on a public engine's tolerance for Cloudflare traffic.
 
-Backends are tried in order: that SearXNG instance, Bing over HTTP, Bing
-through a real Chromium via Browser Rendering (the `BROWSER` binding, Workers
-Paid), then DuckDuckGo's HTML and Lite endpoints as last resorts. DuckDuckGo
+Backends are tried in order: that SearXNG instance, the Cloudflare Web Search
+API (Ceramic.ai, $0.25 per 1,000 searches from AI Gateway credits), Bing over
+HTTP, Bing through a real Chromium via Browser Rendering (the `BROWSER`
+binding, Workers Paid), then DuckDuckGo's HTML and Lite endpoints as last
+resorts. DuckDuckGo
 blocks Cloudflare egress — a real browser gets a challenge page there too. The
 Render free instance sleeps when idle, so the first search after a quiet spell
-can miss the 10-second budget and fall through to Bing; later searches use it.
+can miss the 10-second budget and fall through to Cloudflare Web Search; later
+searches use it again. That fallback is billed at a quarter of a cent per
+thousand searches and never runs while the instance answers. Set
+`CLOUDFLARE_SEARCH` to `off` to disable it, and `AI_GATEWAY_ID` to pick an AI
+Gateway other than `default`. It needs AI Gateway credits loaded, or a
+Ceramic.ai key stored on that gateway; without either, the chain simply moves
+on to Bing.
 Identical queries are cached for five minutes and a backend that answers with
 a rate limit is skipped for one minute.
 

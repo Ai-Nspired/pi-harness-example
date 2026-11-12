@@ -49,6 +49,50 @@ function createBrowserRunner(env: Env) {
   };
 }
 
+/**
+ * Cloudflare's Web Search API with Ceramic.ai: $0.25 per 1,000 searches,
+ * billed to AI Gateway credits. It backs up our own SearXNG instance, which is
+ * free, so it only runs when that instance is asleep or broken.
+ */
+function createCloudflareSearch(env: Env) {
+  return {
+    async search(query: string, limit: number) {
+      const response = await env.AI.websearch({
+        gatewayId: env.AI_GATEWAY_ID ?? "default",
+        query,
+        provider: "ceramic",
+        limit
+      });
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(
+          `Cloudflare Web Search returned ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`
+        );
+      }
+      const payload = (await response.json()) as {
+        items?: { title?: unknown; url?: unknown; description?: unknown }[];
+      };
+      return (Array.isArray(payload.items) ? payload.items : []).flatMap((item) => {
+        const url = typeof item?.url === "string" ? item.url.trim() : "";
+        if (!url) return [];
+        const title = typeof item?.title === "string" ? item.title.trim() : "";
+        return [
+          {
+            title: title || url,
+            url,
+            snippet: typeof item?.description === "string" ? item.description.trim() : ""
+          }
+        ];
+      });
+    }
+  };
+}
+
+/** CLOUDFLARE_SEARCH=off turns the paid fallback off; it is on otherwise. */
+function cloudflareSearchEnabled(env: Env): boolean {
+  return (env.CLOUDFLARE_SEARCH ?? "on").trim().toLowerCase() !== "off";
+}
+
 const PREAMBLE =
   "You are a concise playground assistant. You have a durable workspace at /workspace: read, write, edit, delete, list (ls), find and grep files there, and run JavaScript modules in it with exec, which can also use git. Paths are absolute. Use tools whenever they can answer the request, and explain their results plainly.";
 
@@ -85,11 +129,14 @@ export class PiAgent extends DurableObject<Env> {
         sections: [{ key: "preamble", render: () => PREAMBLE, tag: false }],
         tools: createWorkspaceTools(this.workspace)
       });
-      // Web search: SearXNG when configured, then a real browser, then
-      // DuckDuckGo's HTML and Lite endpoints.
+      // Web search: SearXNG when configured, Cloudflare Web Search when it
+      // fails, then Bing and DuckDuckGo's HTML and Lite endpoints.
       this.registry.install(
         createWebSearchExtension(this.env.SEARXNG_URL, {
-          browser: createBrowserRunner(this.env)
+          browser: createBrowserRunner(this.env),
+          cloudflare: cloudflareSearchEnabled(this.env)
+            ? createCloudflareSearch(this.env)
+            : undefined
         })
       );
       const models = this.openModels();

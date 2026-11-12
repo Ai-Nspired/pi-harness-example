@@ -187,8 +187,11 @@ It uses four meters and nothing else:
 3. **Workers AI** — `@cf/zai-org/glm-5.3-flash`, `thinkingLevel: "low"`. There
    is no OpenRouter call in this repo; see the OpenRouter section for what that
    path would cost.
-4. **Browser Run** — only when SearXNG and Bing HTTP both fail, because search
-   tries the Render instance first.
+4. **Browser Run** — only when SearXNG, Cloudflare Web Search and Bing HTTP all
+   fail, because search tries the Render instance first.
+5. **Cloudflare Web Search** — only when SearXNG misses, at $0.25 per 1,000
+   searches from AI Gateway credits (Ceramic.ai). Never called while the Render
+   instance answers.
 
 Not used: D1, KV, R2, Queues, Hyperdrive, Containers, Vectorize, Logpush.
 
@@ -252,8 +255,9 @@ KV-backed Durable Objects are Paid features.
   $0.054/$0.20 to $0.15/$0.50 per million tokens depending on the route; that
   is a 2.7× swing on the inference line.
 - **Always-on SearXNG.** The Render free instance sleeps, so the first search
-after a quiet spell falls through to Bing. Render Starter is $7/month and
-removes that; it is optional and outside Cloudflare.
+after a quiet spell falls through to Cloudflare Web Search at $0.25 per 1,000 —
+pennies a month at this volume, and cheaper than a $7 Render Starter plan.
+Starter buys latency, not savings; it is optional and outside Cloudflare.
 
 ### Corrections to `pihnotes.txt`
 

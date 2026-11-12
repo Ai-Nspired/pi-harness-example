@@ -9,6 +9,11 @@
   // go here first, so they do not depend on engines that block Cloudflare.
   "vars": {
     "SEARXNG_URL": "https://searing-render.onrender.com",
+    // When SearXNG is asleep or down, search Ceramic.ai through Cloudflare's
+    // Web Search API: $0.25 per 1,000 searches, paid from AI Gateway credits.
+    // It never runs while the instance above answers. Set to "off" to disable.
+    "CLOUDFLARE_SEARCH": "on",
+    "AI_GATEWAY_ID": "default",
     // OpenRouter presets you create in the dashboard, as slugs. Each becomes
     // the model `openrouter/@preset/<slug>`. OPENROUTER_API_KEY is a secret,
     // set in the dashboard, never here.

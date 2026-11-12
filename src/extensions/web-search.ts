@@ -31,6 +31,16 @@ export interface BrowserRunner {
   html(url: string, signal: AbortSignal): Promise<string>;
 }
 
+/** Cloudflare's Web Search API, reached through a Worker's AI binding. */
+export interface CloudflareSearch {
+  /** Search the web; return an empty array when there is nothing to show. */
+  search(
+    query: string,
+    limit: number,
+    signal: AbortSignal
+  ): Promise<{ title: string; url: string; snippet: string }[]>;
+}
+
 export interface WebSearchOptions {
   /** SearXNG `language` parameter, such as `en` or `all`. */
   language?: string;
@@ -46,6 +56,11 @@ export interface WebSearchOptions {
   section?: string | false;
   /** A real browser, for engines that block a Worker's own fetches. */
   browser?: BrowserRunner;
+  /**
+   * Cloudflare's Web Search API. Tried after SearXNG and before Bing: it
+   * answers when our own instance is asleep, for $0.25 per 1,000 searches.
+   */
+  cloudflare?: CloudflareSearch;
   /** Reuse a successful answer for this long, in milliseconds. 0 disables. */
   cacheTtlMs?: number;
   /** Skip a rate-limited backend for this long, in milliseconds. 0 disables. */
@@ -412,6 +427,22 @@ function createSearxngProvider(
   };
 }
 
+/**
+ * Cloudflare's Web Search API through the AI binding: Ceramic.ai's index,
+ * billed to AI Gateway credits at $0.25 per 1,000 searches. It is a fallback
+ * for a SearXNG instance that is down, so it does no work when that instance
+ * answers.
+ */
+function createCloudflareProvider(backend: CloudflareSearch): Provider {
+  return {
+    name: "cloudflare",
+    async search(query, limit, signal) {
+      const hits = (await backend.search(query, limit, signal)).slice(0, limit);
+      return { hits, answers: [], suggestions: [], unavailable: [] };
+    }
+  };
+}
+
 /** DuckDuckGo's HTML endpoint: no key, no instance, best effort. */
 function createDuckDuckGoProvider(doFetch: typeof fetch): Provider {
   return {
@@ -517,8 +548,9 @@ function formatOutcome(query: string, outcome: SearchOutcome, limit: number): st
 
 /**
  * Web search as a native pi-durable extension. Backends, in order: SearXNG
- * when an instance URL is configured, Bing over HTTP, Bing through a real
- * browser, then DuckDuckGo's HTML and Lite endpoints. DuckDuckGo blocks
+ * when an instance URL is configured, Cloudflare Web Search when an AI
+ * binding is passed, Bing over HTTP, Bing through a real browser, then
+ * DuckDuckGo's HTML and Lite endpoints. DuckDuckGo blocks
  * Cloudflare egress, so it is last. The tool is replay-safe: a search has no
  * side effects, so pi may run it again after an eviction interrupted it.
  */
@@ -531,6 +563,9 @@ export function createWebSearchExtension(
   const providers: Provider[] = [];
   if (base !== null) {
     providers.push(createSearxngProvider(base, options, doFetch));
+  }
+  if (options.cloudflare) {
+    providers.push(createCloudflareProvider(options.cloudflare));
   }
   providers.push(createBingProvider(doFetch));
   if (options.browser) {

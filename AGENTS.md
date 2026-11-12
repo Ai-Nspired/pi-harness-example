@@ -38,12 +38,14 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
 
 - `web_search` is a native pi-durable extension (`src/extensions/web-search.ts`).
   `SEARXNG_URL` is our own instance on Render
-  (`https://searing-render.onrender.com`), tried first; then Bing over HTTP,
+  (`https://searing-render.onrender.com`), tried first; then Cloudflare Web
+  Search (Ceramic.ai through `env.AI.websearch`, $0.25 per 1,000 searches from
+  AI Gateway credits, disabled with `CLOUDFLARE_SEARCH=off`), Bing over HTTP,
   Bing through a real Chromium via Browser Rendering (`BROWSER` binding,
   Workers Paid), then DuckDuckGo HTML and Lite. DuckDuckGo blocks Cloudflare
   egress, including from Browser Rendering, so it is only a last resort. The
   Render free instance sleeps, so the first search after idle may fall through
-  to Bing.
+  to Cloudflare Web Search.
 - Successful searches are cached for five minutes; a backend that answers with
   a rate limit is skipped for one minute.
 - `pnpm-lock.yaml` is committed; `agents` is pinned to the 0.32 series because

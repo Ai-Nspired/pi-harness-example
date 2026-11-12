@@ -246,4 +246,44 @@ describe("the web search extension", () => {
     expect(result.isError).toBeFalsy();
     expect(text(result)).toContain("No results for \"nothing at all\"");
   });
+
+  it("asks Cloudflare Web Search when the SearXNG instance fails", async () => {
+    const queries: string[] = [];
+    const extension = createWebSearchExtension("https://searx.example", {
+      fetch: async () => new Response("Format not allowed", { status: 403 }),
+      cloudflare: {
+        async search(query, limit) {
+          queries.push(`${query}:${limit}`);
+          return [
+            { title: "From Ceramic", url: "https://ceramic.example/page", snippet: "live" }
+          ];
+        }
+      }
+    });
+
+    const result = await run(extension, { query: "durable objects" });
+
+    expect(result.isError).toBeFalsy();
+    expect(queries).toEqual(["durable objects:5"]);
+    expect(text(result)).toContain("From Ceramic");
+    expect(text(result)).toContain("https://ceramic.example/page");
+  });
+
+  it("does not pay for Cloudflare Web Search while SearXNG answers", async () => {
+    let cloudflareCalls = 0;
+    const extension = createWebSearchExtension("https://searx.example", {
+      fetch: async () =>
+        jsonResponse({ results: [{ title: "From SearXNG", url: "https://a.example" }] }),
+      cloudflare: {
+        async search() {
+          cloudflareCalls += 1;
+          return [];
+        }
+      }
+    });
+
+    await run(extension, { query: "example" });
+
+    expect(cloudflareCalls).toBe(0);
+  });
 });
