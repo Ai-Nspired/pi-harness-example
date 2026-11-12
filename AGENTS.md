@@ -50,5 +50,9 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
   to Cloudflare Web Search.
 - Successful searches are cached for five minutes; a backend that answers with
   a rate limit is skipped for one minute.
+- Workers in this account talk to each other with `AGENT-PROTOCOL.md`
+  (`src/agent-protocol.ts`): `POST /api/assistant`, `GET /api/agent-card`,
+  `x-agent`, `x-agent-protocol`, `x-agent-request-id`. This Worker is `op`, and
+  `call_agent` reaches the service bindings it is given.
 - `pnpm-lock.yaml` is committed; `agents` is pinned to the 0.32 series because
   newer releases peer against pi 1.5 while the pi packages are pinned to 1.4.0.

@@ -11,6 +11,14 @@ import { PiHarness, ROOT_SESSION } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
+import {
+  AGENT_ERRORS,
+  agentCard,
+  failureBody,
+  parseAgentRequest,
+  responseHeaders,
+  successBody
+} from "./agent-protocol";
 import { createAgentExtension } from "./extensions/agents";
 import { extractDocument, uploadName } from "./extract";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
@@ -472,54 +480,93 @@ export default {
         { headers: { "cache-control": "no-store" } }
       );
     }
+    if (new URL(request.url).pathname === "/api/agent-card") {
+      // What a sibling needs in order to configure itself against this agent.
+      return Response.json(agentCard(new URL(request.url).origin), {
+        headers: { "cache-control": "no-store" }
+      });
+    }
     if (new URL(request.url).pathname === "/api/assistant") {
-      // The worker-to-worker door: one message in, one answer out, on a preset
-      // the caller names or on the session's own. Reached through a service
-      // binding or `getByName`, so a caller needs no key and no socket.
+      // The worker-to-worker door: one envelope in, one envelope out, on a
+      // preset the caller names or on the session's own. Reached through a
+      // service binding or `getByName`, so a caller needs no key and no socket.
+      // The shape is `src/agent-protocol.ts`, and every sibling speaks it.
       if (request.method !== "POST") {
-        return Response.json({ error: "POST a JSON body" }, { status: 405 });
+        return Response.json(
+          failureBody(crypto.randomUUID(), AGENT_ERRORS.invalidRequest, "POST a JSON body"),
+          { status: 405 }
+        );
       }
-      let body: { message?: unknown; preset?: unknown; session?: unknown };
+      let raw: unknown;
       try {
-        body = (await request.json()) as typeof body;
+        raw = await request.json();
       } catch {
-        return Response.json({ error: "Expected a JSON body" }, { status: 400 });
+        return Response.json(
+          failureBody(
+            crypto.randomUUID(),
+            AGENT_ERRORS.invalidRequest,
+            "Expected a JSON body"
+          ),
+          { status: 400 }
+        );
       }
-      const message = typeof body.message === "string" ? body.message.trim() : "";
-      if (!message) {
-        return Response.json({ error: "Pass a message" }, { status: 400 });
+      const parsed = parseAgentRequest(raw, request.headers);
+      if (!parsed.ok) {
+        return Response.json(
+          failureBody(parsed.requestId, parsed.code, parsed.message),
+          {
+            status: parsed.code === AGENT_ERRORS.unsupportedVersion ? 426 : 400,
+            headers: responseHeaders(parsed.requestId)
+          }
+        );
       }
-      const preset = typeof body.preset === "string" ? body.preset : undefined;
-      if (preset !== undefined) {
-        const setup = createOpenRouterSetup(env);
+
+      const setup = createOpenRouterSetup(env);
+      if (parsed.preset !== undefined) {
         const id =
-          preset.trim() === ""
+          parsed.preset.trim() === ""
             ? setup?.baseModelId
-            : resolvePresetModel(setup?.entries ?? [], preset);
+            : resolvePresetModel(setup?.entries ?? [], parsed.preset);
         if (!id) {
           return Response.json(
-            {
-              error: `Unknown preset ${JSON.stringify(preset)}`,
-              presets: setup?.presets ?? []
-            },
-            { status: 400 }
+            failureBody(
+              parsed.requestId,
+              AGENT_ERRORS.unknownPreset,
+              `Unknown preset ${JSON.stringify(parsed.preset)}. Configured: ${
+                setup?.presets.join(", ") || "none"
+              }`
+            ),
+            { status: 400, headers: responseHeaders(parsed.requestId) }
           );
         }
       }
-      const session =
-        typeof body.session === "string" && body.session.trim()
-          ? body.session.trim()
-          : "assistant";
+
       try {
-        const answer = await env.PiAgent.getByName(session).ask(message, preset);
+        const answer = await env.PiAgent.getByName(parsed.session).ask(
+          parsed.message,
+          parsed.preset
+        );
+        console.log("agent request", {
+          from: parsed.from,
+          requestId: parsed.requestId,
+          session: parsed.session,
+          preset: parsed.preset ?? "session"
+        });
         return Response.json(
-          { session, ...answer },
-          { headers: { "cache-control": "no-store" } }
+          successBody({
+            requestId: parsed.requestId,
+            session: parsed.session,
+            text: answer.text,
+            model: answer.model
+          }),
+          { headers: responseHeaders(parsed.requestId) }
         );
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("agent request failed", { requestId: parsed.requestId, message });
         return Response.json(
-          { error: error instanceof Error ? error.message : String(error) },
-          { status: 500 }
+          failureBody(parsed.requestId, AGENT_ERRORS.unavailable, message),
+          { status: 500, headers: responseHeaders(parsed.requestId) }
         );
       }
     }

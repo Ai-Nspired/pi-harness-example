@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
+import { outgoingHeaders, PROTOCOL_HEADERS } from "../agent-protocol";
 
 /**
  * Calling the other Workers this deployment is bound to. The routes inside those
@@ -67,22 +68,28 @@ export function createAgentExtension(targets: AgentTargets): Extension {
       // Any host works for a service binding; the binding decides the service.
       const url = `https://${agent.toLowerCase().replace(/[^a-z0-9-]/g, "-")}${route}`;
       const verb = method ?? (body === undefined ? "GET" : "POST");
+      // Every call carries the account's protocol headers, so a sibling can log
+      // who asked and correlate the reply, whichever agent wrote it.
+      const requestId = crypto.randomUUID();
 
       try {
         const response = await target.fetch(url, {
           method: verb,
-          ...(body === undefined
-            ? {}
-            : { body, headers: { "content-type": "application/json" } }),
+          headers: outgoingHeaders(requestId),
+          ...(body === undefined ? {} : { body }),
           signal: AbortSignal.timeout(TIMEOUT_MS)
         });
         const text = (await response.text()).slice(0, MAX_BODY_CHARS);
+        const theirVersion = response.headers.get(PROTOCOL_HEADERS.version);
+        const version = theirVersion
+          ? `, ${PROTOCOL_HEADERS.version}: ${theirVersion}`
+          : `, no ${PROTOCOL_HEADERS.version} header (does not speak the convention)`;
         return {
           output: [
             {
               type: "text" as const,
-              text: `${verb} ${agent}${route} → ${response.status} ${response.statusText}${
-                text.trim() ? `\n${text}` : "\n(empty body)"
+              text: `${verb} ${agent}${route} → ${response.status} ${response.statusText}\nrequest ${requestId}${version}\n${
+                text.trim() ? text : "(empty body)"
               }`
             }
           ],
