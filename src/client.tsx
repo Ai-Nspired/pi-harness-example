@@ -14,8 +14,10 @@ import {
   FilePlusIcon,
   GearIcon,
   GitBranchIcon,
+  MicrophoneIcon,
   MoonIcon,
   PaperPlaneRightIcon,
+  PaperclipIcon,
   PlusIcon,
   StopIcon,
   SunIcon,
@@ -456,6 +458,108 @@ function App() {
     () => window.matchMedia("(min-width: 1100px)").matches
   );
   const endRef = useRef<HTMLDivElement>(null);
+  // Dictation and uploads both end as text in the composer, so the model gets
+  // an ordinary message and nothing new is needed on the wire.
+  const [intake, setIntake] = useState<
+    null | "recording" | "transcribing" | "reading"
+  >(null);
+  const [intakeError, setIntakeError] = useState<string | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const recorded = useRef<Blob[]>([]);
+  const filePicker = useRef<HTMLInputElement>(null);
+
+  const appendToPrompt = (text: string) =>
+    setPrompt((current) => (current.trim() ? `${current}\n\n${text}` : text));
+
+  const dictate = async () => {
+    if (intake === "recording") {
+      recorder.current?.stop();
+      return;
+    }
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices) {
+      setIntakeError("This browser cannot record audio.");
+      return;
+    }
+    setIntakeError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const media = new MediaRecorder(stream);
+      recorded.current = [];
+      media.ondataavailable = (event) => {
+        if (event.data.size > 0) recorded.current.push(event.data);
+      };
+      media.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(recorded.current, {
+          type: media.mimeType || "audio/webm"
+        });
+        setIntake("transcribing");
+        void fetch("/api/transcribe", {
+          method: "POST",
+          headers: { "content-type": blob.type },
+          body: blob
+        })
+          .then(async (response) => {
+            const payload = (await response.json()) as {
+              text?: string;
+              error?: string;
+            };
+            if (!response.ok) {
+              throw new Error(payload.error ?? `HTTP ${response.status}`);
+            }
+            if (!payload.text) {
+              throw new Error("No speech was heard in that recording.");
+            }
+            appendToPrompt(payload.text);
+          })
+          .catch((error: unknown) =>
+            setIntakeError(error instanceof Error ? error.message : String(error))
+          )
+          .finally(() => setIntake(null));
+      };
+      recorder.current = media;
+      media.start();
+      setIntake("recording");
+    } catch {
+      setIntake(null);
+      setIntakeError(
+        "The microphone was refused. Allow it in the browser settings."
+      );
+    }
+  };
+
+  const attach = async (file: File) => {
+    setIntakeError(null);
+    setIntake("reading");
+    try {
+      const response = await fetch(
+        `/api/extract?name=${encodeURIComponent(file.name)}`,
+        {
+          method: "POST",
+          headers: { "content-type": file.type || "application/octet-stream" },
+          body: file
+        }
+      );
+      const payload = (await response.json()) as {
+        name?: string;
+        text?: string;
+        truncated?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.text) {
+        throw new Error(payload.error ?? `Could not read ${file.name}`);
+      }
+      appendToPrompt(
+        `${payload.name ?? file.name}${
+          payload.truncated ? " (first part)" : ""
+        }:\n${payload.text}`
+      );
+    } catch (error) {
+      setIntakeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIntake(null);
+    }
+  };
   const {
     status,
     messages,
@@ -648,6 +752,50 @@ function App() {
             className="mx-auto max-w-3xl px-5 pt-4"
           >
             <div className="flex items-end gap-3 rounded-xl border border-kumo-line bg-kumo-base p-3 shadow-sm transition-shadow focus-within:border-transparent focus-within:ring-2 focus-within:ring-kumo-ring">
+              <div className="mb-0.5 flex gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  shape="square"
+                  aria-label={
+                    intake === "recording" ? "Stop dictating" : "Dictate a message"
+                  }
+                  aria-pressed={intake === "recording"}
+                  disabled={
+                    !connected || intake === "transcribing" || intake === "reading"
+                  }
+                  onClick={() => void dictate()}
+                  icon={
+                    <MicrophoneIcon
+                      size={18}
+                      weight={intake === "recording" ? "fill" : "regular"}
+                      className={
+                        intake === "recording" ? "text-kumo-danger" : undefined
+                      }
+                    />
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  shape="square"
+                  aria-label="Attach a file"
+                  disabled={!connected || intake !== null}
+                  onClick={() => filePicker.current?.click()}
+                  icon={<PaperclipIcon size={18} />}
+                />
+                <input
+                  ref={filePicker}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.docx,.txt,.md,.csv,.json,application/pdf,text/plain"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void attach(file);
+                  }}
+                />
+              </div>
               <InputArea
                 value={prompt}
                 onValueChange={setPrompt}
@@ -701,6 +849,19 @@ function App() {
               )}
             </div>
           </form>
+          {intake && intake !== "recording" ? (
+            <p className="mx-auto max-w-3xl px-5 pt-2 text-xs text-kumo-subtle">
+              {intake === "transcribing" ? "Transcribing…" : "Reading the file…"}
+            </p>
+          ) : null}
+          {intakeError ? (
+            <p
+              role="alert"
+              className="mx-auto max-w-3xl px-5 pt-2 text-xs text-kumo-danger"
+            >
+              {intakeError}
+            </p>
+          ) : null}
           <div className="flex items-center justify-center gap-2 px-5 py-3">
             <span className="hidden text-[10px] text-kumo-inactive sm:inline">
               Enter to send · Shift+Enter for a new line

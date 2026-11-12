@@ -11,6 +11,7 @@ import { PiHarness, ROOT_SESSION } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
+import { extractDocument, uploadName } from "./extract";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
 import {
@@ -22,6 +23,14 @@ import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
 const MODEL_ID = "@cf/zai-org/glm-5.3-flash";
+/** Speech to text on the AI binding, so dictation needs no key of its own. */
+const TRANSCRIBE_MODEL = "@cf/openai/whisper-large-v3-turbo";
+/** A dictation longer than this is a mistake, not a message. */
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+/** Bigger than a docket, so refuse it rather than hold it in memory. */
+const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+/** Past this, the answer is the file's beginning; the response says so. */
+const MAX_EXTRACTED_CHARS = 40_000;
 
 /**
  * A real Chromium through Browser Rendering. Worker fetches to DuckDuckGo can
@@ -295,6 +304,83 @@ export class PiAgent extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (new URL(request.url).pathname === "/api/transcribe") {
+      // Dictation: the browser posts the recording, Whisper turns it into text.
+      if (request.method !== "POST") {
+        return Response.json({ error: "POST the audio" }, { status: 405 });
+      }
+      const audio = await request.arrayBuffer();
+      if (audio.byteLength === 0) {
+        return Response.json({ error: "The recording was empty" }, { status: 400 });
+      }
+      if (audio.byteLength > MAX_AUDIO_BYTES) {
+        return Response.json(
+          { error: "That recording is too long to transcribe" },
+          { status: 413 }
+        );
+      }
+      try {
+        const ai = env.AI as unknown as {
+          run(
+            model: string,
+            inputs: { audio: number[] }
+          ): Promise<{ text?: string }>;
+        };
+        const result = await ai.run(TRANSCRIBE_MODEL, {
+          audio: [...new Uint8Array(audio)]
+        });
+        return Response.json(
+          { text: result.text?.trim() ?? "" },
+          { headers: { "cache-control": "no-store" } }
+        );
+      } catch (error) {
+        return Response.json(
+          {
+            error: `Transcription failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          },
+          { status: 502 }
+        );
+      }
+    }
+    if (new URL(request.url).pathname === "/api/extract") {
+      // An uploaded docket, read into text before it reaches the model: PDF,
+      // DOCX and plain text, with the file named in `?name=`.
+      if (request.method !== "POST") {
+        return Response.json({ error: "POST the file" }, { status: 405 });
+      }
+      const name = uploadName(new URL(request.url).searchParams.get("name"));
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.byteLength === 0) {
+        return Response.json({ error: "That file is empty" }, { status: 400 });
+      }
+      if (bytes.byteLength > MAX_DOCUMENT_BYTES) {
+        return Response.json({ error: "That file is too large" }, { status: 413 });
+      }
+      try {
+        const text = await extractDocument(name, bytes);
+        const clipped = text.slice(0, MAX_EXTRACTED_CHARS);
+        return Response.json(
+          {
+            name,
+            text: clipped,
+            characters: text.length,
+            truncated: clipped.length < text.length
+          },
+          { headers: { "cache-control": "no-store" } }
+        );
+      } catch (error) {
+        return Response.json(
+          {
+            error: `Could not read ${name}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          },
+          { status: 400 }
+        );
+      }
+    }
     if (new URL(request.url).pathname === "/api/search") {
       // Diagnostics from a phone: run the same backends the tool uses, in
       // order, and report which one answered. A sleeping instance or a blocked
