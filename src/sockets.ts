@@ -11,6 +11,12 @@ import {
   type PiSessionId
 } from "agents/harness/pi";
 import { resolvePresetModel, type PresetEntry } from "./openrouter";
+
+/** The presets a socket may switch to, and the model to fall back to. */
+export type PresetSwitch = {
+  readonly entries: readonly PresetEntry[];
+  readonly baseModelId: string;
+};
 import type { PiClientMessage, PiServerMessage } from "./protocol";
 
 const SESSION_TAG_PREFIX = "pi-session:";
@@ -63,20 +69,23 @@ export class PiSessionSockets {
   readonly #registry: RegistryReader;
   readonly #getWebSockets: (tag?: string) => WebSocket[];
   readonly #watches = new Map<WebSocket, AgentEventStream>();
-  /** Presets a client may switch to; empty when no OpenRouter key is set. */
-  readonly #entries: readonly PresetEntry[];
+  /**
+   * What a client may switch to: the configured presets, plus the plain model
+   * an empty choice falls back to. Absent when there is no OpenRouter key.
+   */
+  readonly #presets: PresetSwitch | undefined;
 
   constructor(
     harness: PiHarness,
     /** The registry pi was opened with, for the tool list sent on connect. */
     registry: RegistryReader,
     getWebSockets: (tag?: string) => WebSocket[],
-    entries: readonly PresetEntry[] = []
+    presets?: PresetSwitch
   ) {
     this.#harness = harness;
     this.#registry = registry;
     this.#getWebSockets = getWebSockets;
-    this.#entries = entries;
+    this.#presets = presets;
   }
 
   options(): WebSocketsOptions {
@@ -121,7 +130,7 @@ export class PiSessionSockets {
         .snapshot()
         .tools()
         .map(({ tool }) => ({ name: tool.name, description: tool.description })),
-      presets: this.#entries.map((entry) => entry.slug)
+      presets: this.#presets?.entries.map((entry) => entry.slug) ?? []
     });
     await this.#watch(connection, session);
   }
@@ -189,14 +198,19 @@ export class PiSessionSockets {
         await handle.reset(message.handoff);
         return null;
       case "setModel": {
-        // Only a configured preset may be chosen. A slug that is not in
-        // OPENROUTER_PRESETS would reach OpenRouter as an unknown model and
-        // fail mid-reply, so it is refused here with the list to pick from.
-        const id = resolvePresetModel(this.#entries, message.preset);
+        // Only a configured preset, or no preset at all, may be chosen. A slug
+        // that is not in OPENROUTER_PRESETS would reach OpenRouter as an
+        // unknown model and fail mid-reply, so it is refused here with the
+        // list to pick from.
+        const wanted = message.preset.trim();
+        const id =
+          wanted === ""
+            ? this.#presets?.baseModelId
+            : resolvePresetModel(this.#presets?.entries ?? [], wanted);
         if (!id) {
           throw new Error(
             `Unknown preset ${JSON.stringify(message.preset)}. Configured: ${
-              this.#entries.map((entry) => entry.slug).join(", ") || "none"
+              this.#presets?.entries.map((entry) => entry.slug).join(", ") || "none"
             }`
           );
         }

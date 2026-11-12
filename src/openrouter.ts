@@ -193,6 +193,8 @@ export interface OpenRouterSetup {
   defaultModelId: string;
   /** The configured entries, each with the id a switch must send. */
   entries: readonly PresetEntry[];
+  /** The plain model, used when no preset is selected. */
+  baseModelId: string;
 }
 
 /**
@@ -295,5 +297,5 @@ export function createOpenRouterSetup(env: OpenRouterEnv): OpenRouterSetup | und
   // the first configured preset, or the metadata model picked above.
   const defaultModelId = matched?.id ?? presetModels[0]?.id ?? baseModel.id;
 
-  return { provider, presets, defaultModelId, entries };
+  return { provider, presets, defaultModelId, entries, baseModelId: baseModel.id };
 }

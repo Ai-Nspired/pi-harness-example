@@ -188,6 +188,34 @@ ceiling to fit your most expensive preset if you want it applied everywhere.
 - A wrong slug fails at request time, not at startup, because the catalog is
   built from configuration rather than validated against your account.
 
+## Switching presets, and calling the harness from another Worker
+
+The app shows a chip per configured preset. Pressing one sends `setModel` over
+the session socket; pressing the active one sends an empty slug, which clears
+the choice and runs the plain `OPENROUTER_MODEL` again. The switch goes through
+pi's own `session.setModel`, so it is stored on the conversation: it survives a
+reconnect, needs no new session, and applies to the next reply. A slug that is
+not in `OPENROUTER_PRESETS` is refused with the list to choose from.
+
+Another Worker can call this one without a key or a socket:
+
+```ts
+const answer = await env.PI_HARNESS
+  .getByName("assistant")
+  .ask("What does PC 1192.5 require?", "truth");
+```
+
+`ask(text, preset?)` answers one message. Pass a slug to pin the preset for that
+call, pass `""` to run the plain model, or omit it to use whatever preset the
+session already holds. From outside the account, the same thing is an HTTP POST
+to `/api/assistant` with `{ "message": ..., "preset": "truth", "session":
+"assistant" }`, which returns `{ session, text, model }`; an unknown preset is a
+400 that lists the configured ones.
+
+What is not built: choosing the preset from the message itself. That needs a
+description of what each preset is for, which the configuration does not carry
+today — slugs alone cannot say whether a question belongs to `truth` or `mnl`.
+
 ## Later: a Worker that is only a router
 
 A separate Worker whose single job is to forward to OpenRouter is a reasonable

@@ -13,7 +13,11 @@ import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
-import { createOpenRouterSetup, presetModelId } from "./openrouter";
+import {
+  createOpenRouterSetup,
+  presetModelId,
+  resolvePresetModel
+} from "./openrouter";
 import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
@@ -189,7 +193,12 @@ export class PiAgent extends DurableObject<Env> {
     this.harness,
     this.registry,
     (tag) => this.ctx.getWebSockets(tag),
-    this.openrouter?.entries ?? []
+    this.openrouter
+      ? {
+          entries: this.openrouter.entries,
+          baseModelId: this.openrouter.baseModelId
+        }
+      : undefined
   );
   readonly webSockets = new WebSockets(this.sockets.options());
   readonly lifecycle = Lifecycle.install(this)
@@ -231,6 +240,43 @@ export class PiAgent extends DurableObject<Env> {
       "was",
       stored ? `${stored.provider}/${stored.id}` : "unset"
     );
+  }
+
+  /**
+   * Another Worker's way in: answer one message here, on a named preset. A
+   * caller that knows the preset passes its slug; one that does not gets this
+   * session's stored model, so a conversation started on `truth` stays there.
+   * An empty preset runs the plain model.
+   */
+  async ask(
+    text: string,
+    preset?: string
+  ): Promise<{ text: string; model: string }> {
+    const setup = this.openrouter;
+    let model: string = setup?.defaultModelId ?? MODEL_ID;
+    if (preset !== undefined) {
+      const wanted = preset.trim();
+      const resolved: string | undefined =
+        wanted === ""
+          ? setup?.baseModelId
+          : resolvePresetModel(setup?.entries ?? [], wanted);
+      if (resolved === undefined) {
+        throw new Error(
+          `Unknown preset ${JSON.stringify(preset)}. Configured: ${
+            setup?.presets.join(", ") || "none"
+          }`
+        );
+      }
+      const id = resolved;
+      await this.harness.session(ROOT_SESSION).setModel({
+        provider: "openrouter",
+        id
+      });
+      model = id;
+    }
+    const answer = await this.harness.prompt(text);
+    // `text` is absent when the run ended without a final assistant message.
+    return { text: answer.text ?? "", model };
   }
 
   /** Host startup, after the harness has opened pi. */
@@ -293,6 +339,57 @@ export default {
         { query, provider: null, attempts },
         { headers: { "cache-control": "no-store" } }
       );
+    }
+    if (new URL(request.url).pathname === "/api/assistant") {
+      // The worker-to-worker door: one message in, one answer out, on a preset
+      // the caller names or on the session's own. Reached through a service
+      // binding or `getByName`, so a caller needs no key and no socket.
+      if (request.method !== "POST") {
+        return Response.json({ error: "POST a JSON body" }, { status: 405 });
+      }
+      let body: { message?: unknown; preset?: unknown; session?: unknown };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return Response.json({ error: "Expected a JSON body" }, { status: 400 });
+      }
+      const message = typeof body.message === "string" ? body.message.trim() : "";
+      if (!message) {
+        return Response.json({ error: "Pass a message" }, { status: 400 });
+      }
+      const preset = typeof body.preset === "string" ? body.preset : undefined;
+      if (preset !== undefined) {
+        const setup = createOpenRouterSetup(env);
+        const id =
+          preset.trim() === ""
+            ? setup?.baseModelId
+            : resolvePresetModel(setup?.entries ?? [], preset);
+        if (!id) {
+          return Response.json(
+            {
+              error: `Unknown preset ${JSON.stringify(preset)}`,
+              presets: setup?.presets ?? []
+            },
+            { status: 400 }
+          );
+        }
+      }
+      const session =
+        typeof body.session === "string" && body.session.trim()
+          ? body.session.trim()
+          : "assistant";
+      try {
+        const answer = await env.PiAgent.getByName(session).ask(message, preset);
+        return Response.json(
+          { session, ...answer },
+          { headers: { "cache-control": "no-store" } }
+        );
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: 500 }
+        );
+      }
     }
     if (new URL(request.url).pathname === "/api/route") {
       // What this deployment is actually set up to run, readable from a phone:

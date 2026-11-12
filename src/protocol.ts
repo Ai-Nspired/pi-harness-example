@@ -24,7 +24,10 @@ export type PiClientMessage =
     }
   | { readonly type: "abort"; readonly id?: string }
   | { readonly type: "reset"; readonly id?: string; readonly handoff?: string }
-  /** Switch this session to a configured preset, by its slug. */
+  /**
+   * Switch this session to a configured preset, by its slug. An empty preset
+   * clears the choice and runs the plain model instead.
+   */
   | {
       readonly type: "setModel";
       readonly id?: string;

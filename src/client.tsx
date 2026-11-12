@@ -120,7 +120,8 @@ function ModeToggle() {
 /**
  * The preset switch. The server names the presets it will accept, and the
  * active one comes from the session's stored model, so this shows the preset
- * the next reply will actually run on.
+ * the next reply will actually run on. Pressing the active one clears it: no
+ * preset is selected, and the plain model answers.
  */
 function PresetToggle({
   presets,
@@ -146,7 +147,7 @@ function PresetToggle({
               key={slug}
               type="button"
               aria-pressed={active}
-              onClick={() => onPick(slug)}
+              onClick={() => onPick(active ? "" : slug)}
               className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
                 active
                   ? "border-transparent bg-kumo-brand text-white"
