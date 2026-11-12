@@ -120,6 +120,25 @@ function ModeToggle() {
 }
 
 /**
+ * A JSON body, or an error that explains what came back instead. A route that
+ * is not deployed answers with an HTML page, and "Unexpected token '<'" tells
+ * nobody which one.
+ */
+async function readJson<T>(response: Response): Promise<T & { error?: string }> {
+  const body = await response.text();
+  try {
+    return JSON.parse(body) as T & { error?: string };
+  } catch {
+    const text = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    throw new Error(
+      `${response.status} ${response.statusText}${
+        text ? `: ${text.slice(0, 140)}` : ""
+      }`
+    );
+  }
+}
+
+/**
  * The preset switch. The server names the presets it will accept, and the
  * active one comes from the session's stored model, so this shows the preset
  * the next reply will actually run on. Pressing the active one clears it: no
@@ -493,6 +512,11 @@ function App() {
         const blob = new Blob(recorded.current, {
           type: media.mimeType || "audio/webm"
         });
+        if (blob.size === 0) {
+          setIntake(null);
+          setIntakeError("Nothing was recorded. Try again and speak after the tap.");
+          return;
+        }
         setIntake("transcribing");
         void fetch("/api/transcribe", {
           method: "POST",
@@ -500,10 +524,7 @@ function App() {
           body: blob
         })
           .then(async (response) => {
-            const payload = (await response.json()) as {
-              text?: string;
-              error?: string;
-            };
+            const payload = await readJson<{ text?: string }>(response);
             if (!response.ok) {
               throw new Error(payload.error ?? `HTTP ${response.status}`);
             }
@@ -540,12 +561,11 @@ function App() {
           body: file
         }
       );
-      const payload = (await response.json()) as {
+      const payload = await readJson<{
         name?: string;
         text?: string;
         truncated?: boolean;
-        error?: string;
-      };
+      }>(response);
       if (!response.ok || !payload.text) {
         throw new Error(payload.error ?? `Could not read ${file.name}`);
       }

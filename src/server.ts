@@ -32,6 +32,16 @@ const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 /** Past this, the answer is the file's beginning; the response says so. */
 const MAX_EXTRACTED_CHARS = 40_000;
 
+/** Base64 without blowing the argument stack on a long recording. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+  return btoa(binary);
+}
+
 /**
  * A real Chromium through Browser Rendering. Worker fetches to DuckDuckGo can
  * be rate limited or challenged; a browser session gets its own fingerprint.
@@ -306,6 +316,13 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (new URL(request.url).pathname === "/api/transcribe") {
       // Dictation: the browser posts the recording, Whisper turns it into text.
+      if (request.method === "GET") {
+        // A reachable answer here means the deploy carries this route at all.
+        return Response.json(
+          { model: TRANSCRIBE_MODEL, maxBytes: MAX_AUDIO_BYTES },
+          { headers: { "cache-control": "no-store" } }
+        );
+      }
       if (request.method !== "POST") {
         return Response.json({ error: "POST the audio" }, { status: 405 });
       }
@@ -323,23 +340,30 @@ export default {
         const ai = env.AI as unknown as {
           run(
             model: string,
-            inputs: { audio: number[] }
+            inputs: { audio: string; task?: string }
           ): Promise<{ text?: string }>;
         };
+        const bytes = new Uint8Array(audio);
+        // The model's schema takes base64 audio, not a byte array.
         const result = await ai.run(TRANSCRIBE_MODEL, {
-          audio: [...new Uint8Array(audio)]
+          audio: toBase64(bytes),
+          task: "transcribe"
+        });
+        const text = result.text?.trim() ?? "";
+        console.log("transcribe", {
+          bytes: bytes.byteLength,
+          type: request.headers.get("content-type") ?? "unknown",
+          characters: text.length
         });
         return Response.json(
-          { text: result.text?.trim() ?? "" },
+          { text },
           { headers: { "cache-control": "no-store" } }
         );
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("transcribe failed", message);
         return Response.json(
-          {
-            error: `Transcription failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          },
+          { error: `Transcription failed: ${message}` },
           { status: 502 }
         );
       }
