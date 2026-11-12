@@ -120,7 +120,7 @@ interface SearchFilters {
   timeRange?: "day" | "week" | "month" | "year";
 }
 
-interface Provider {
+export interface Provider {
   name: string;
   search(
     query: string,
@@ -547,17 +547,16 @@ function formatOutcome(query: string, outcome: SearchOutcome, limit: number): st
 }
 
 /**
- * Web search as a native pi-durable extension. Backends, in order: SearXNG
- * when an instance URL is configured, Cloudflare Web Search when an AI
- * binding is passed, Bing over HTTP, Bing through a real browser, then
- * DuckDuckGo's HTML and Lite endpoints. DuckDuckGo blocks
- * Cloudflare egress, so it is last. The tool is replay-safe: a search has no
- * side effects, so pi may run it again after an eviction interrupted it.
+ * The backends, in the order they are tried: SearXNG when an instance is
+ * configured, Cloudflare Web Search when an AI binding is passed, Bing over
+ * HTTP, Bing through a real browser, then DuckDuckGo's HTML and Lite
+ * endpoints. Exported so a host can exercise the same chain for a diagnostic
+ * without going through the model.
  */
-export function createWebSearchExtension(
+export function createSearchProviders(
   instanceUrl: string | undefined,
   options: WebSearchOptions = {}
-): Extension {
+): Provider[] {
   const base = normalizeInstance(instanceUrl);
   const doFetch = options.fetch ?? fetch;
   const providers: Provider[] = [];
@@ -575,6 +574,19 @@ export function createWebSearchExtension(
   }
   providers.push(createDuckDuckGoProvider(doFetch));
   providers.push(createDuckDuckGoLiteProvider(doFetch));
+  return providers;
+}
+
+/**
+ * Web search as a native pi-durable extension. DuckDuckGo blocks
+ * Cloudflare egress, so it is last. The tool is replay-safe: a search has no
+ * side effects, so pi may run it again after an eviction interrupted it.
+ */
+export function createWebSearchExtension(
+  instanceUrl: string | undefined,
+  options: WebSearchOptions = {}
+): Extension {
+  const providers = createSearchProviders(instanceUrl, options);
 
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
@@ -604,6 +616,8 @@ export function createWebSearchExtension(
       }
 
       const errors: string[] = [];
+      /** Backends that answered properly but had nothing to show. */
+      const empties: string[] = [];
       for (const provider of providers) {
         if ((cooling.get(provider.name) ?? 0) > Date.now()) {
           errors.push(`${provider.name}: skipped after a rate limit`);
@@ -618,6 +632,12 @@ export function createWebSearchExtension(
             category,
             timeRange
           });
+          // A backend that answers with nothing is not an answer: try the next
+          // one, so a throttled or half-configured index cannot hide the rest.
+          if (outcome.hits.length === 0 && outcome.answers.length === 0) {
+            empties.push(provider.name);
+            continue;
+          }
           const answer = formatOutcome(query, outcome, limit);
           if (cacheTtlMs > 0) {
             cache.set(key, { text: answer, expires: Date.now() + cacheTtlMs });
@@ -636,6 +656,13 @@ export function createWebSearchExtension(
           }
           errors.push(`${provider.name}: ${message}`);
         }
+      }
+
+      if (empties.length > 0) {
+        // Every backend that answered at all answered with nothing.
+        const failures =
+          errors.length > 0 ? ` Backends that failed: ${errors.join(" ")}` : "";
+        return textResult(`No results for "${query}".${failures}`);
       }
 
       return errorResult(

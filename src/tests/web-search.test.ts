@@ -236,6 +236,24 @@ describe("the web search extension", () => {
     expect(text(result)).toContain("search.formats");
   });
 
+  it("tries the next backend when one answers with nothing", async () => {
+    const requests: string[] = [];
+    const extension = createWebSearchExtension("https://searx.example", {
+      fetch: async (input) => {
+        requests.push(String(input));
+        return String(input).includes("searx.example")
+          ? jsonResponse({ results: [] })
+          : htmlResponse(BING_HTML);
+      }
+    });
+
+    const result = await run(extension, { query: "durable objects" });
+
+    // An empty answer from the instance must not hide the backends behind it.
+    expect(text(result)).toContain("Durable Objects & pricing");
+    expect(requests.some((url) => url.includes("bing.com"))).toBe(true);
+  });
+
   it("says so when every backend legitimately finds nothing", async () => {
     const extension = createWebSearchExtension(undefined, {
       fetch: async () => htmlResponse("<html><body>No results found</body></html>")

@@ -11,7 +11,7 @@ import { PiHarness, ROOT_SESSION } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
-import { createWebSearchExtension } from "./extensions/web-search";
+import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
 import { createOpenRouterSetup, presetModelId } from "./openrouter";
 import { PiSessionSockets } from "./sockets";
@@ -246,6 +246,51 @@ export class PiAgent extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (new URL(request.url).pathname === "/api/search") {
+      // Diagnostics from a phone: run the same backends the tool uses, in
+      // order, and report which one answered. A sleeping instance or a blocked
+      // engine becomes visible here instead of inside a model reply.
+      const query = new URL(request.url).searchParams.get("q")?.trim();
+      if (!query) return Response.json({ error: "Pass ?q=" }, { status: 400 });
+      const providers = createSearchProviders(env.SEARXNG_URL, {
+        browser: createBrowserRunner(env),
+        cloudflare: cloudflareSearchEnabled(env)
+          ? createCloudflareSearch(env)
+          : undefined
+      });
+      const attempts: {
+        provider: string;
+        results: number;
+        error?: string;
+      }[] = [];
+      for (const provider of providers) {
+        try {
+          const outcome = await provider.search(
+            query,
+            3,
+            AbortSignal.timeout(8_000),
+            {}
+          );
+          attempts.push({ provider: provider.name, results: outcome.hits.length });
+          if (outcome.hits.length > 0) {
+            return Response.json(
+              { query, provider: provider.name, attempts, hits: outcome.hits },
+              { headers: { "cache-control": "no-store" } }
+            );
+          }
+        } catch (error) {
+          attempts.push({
+            provider: provider.name,
+            results: 0,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+      return Response.json(
+        { query, provider: null, attempts },
+        { headers: { "cache-control": "no-store" } }
+      );
+    }
     if (new URL(request.url).pathname === "/api/route") {
       // What this deployment is actually set up to run, readable from a phone:
       // the model a new session starts on, and the presets it was given. The
