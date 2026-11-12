@@ -60,21 +60,6 @@ body {
   counter-reset: line;
 }
 
-/* The busy indicator turns clockwise, stated here rather than inherited from a
-   theme utility, so its direction is fixed instead of depending on the theme. */
-@keyframes spin-clockwise {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.spin-clockwise {
-  animation: spin-clockwise 1s linear infinite;
-}
-
 @keyframes pulse {
   from {
     opacity: 0.25;

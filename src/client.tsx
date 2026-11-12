@@ -105,7 +105,7 @@ function ToolCallCard({
     <details className="rounded-xl border border-kumo-line bg-kumo-base">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5">
         {running ? (
-          <GearIcon size={14} className="spin-clockwise text-kumo-inactive" />
+          <GearIcon size={14} className="animate-spin text-kumo-inactive" />
         ) : (
           <CheckCircleIcon size={14} className="text-kumo-success" />
         )}
@@ -358,7 +358,7 @@ function Sidebar({
           >
             <div className="flex items-center gap-2">
               {activeTools.includes(tool.name) ? (
-                <GearIcon size={14} className="spin-clockwise text-kumo-accent" />
+                <GearIcon size={14} className="animate-spin text-kumo-accent" />
               ) : (
                 <WrenchIcon size={14} className="text-kumo-inactive" />
               )}
@@ -514,7 +514,7 @@ function App() {
                 </div>
                 <Surface className="rounded-xl px-4 py-3 ring ring-kumo-line">
                   <div className="flex items-center gap-2 text-sm text-kumo-subtle">
-                    <GearIcon size={15} className="spin-clockwise" />
+                    <GearIcon size={15} className="animate-spin" />
                     {retry
                       ? `Retrying: ${retry.error}`
                       : runningTools.length > 0
