@@ -38,7 +38,9 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
 
 - `web_search` is a native pi-durable extension (`src/extensions/web-search.ts`).
   `SEARXNG_URL` is our own instance on Render
-  (`https://searing-render.onrender.com`), tried first; then Cloudflare Web
+  (`https://searing-render.onrender.com`), tried first. `SEARXNG_URL` may list
+  several instances separated by commas, in the order they should be tried, so
+  a sleeping instance is skipped by a second one rather than by a scraper; then Cloudflare Web
   Search (Ceramic.ai through `env.AI.websearch`, $0.25 per 1,000 searches from
   AI Gateway credits, disabled with `CLOUDFLARE_SEARCH=off`), Bing over HTTP,
   Bing through a real Chromium via Browser Rendering (`BROWSER` binding,

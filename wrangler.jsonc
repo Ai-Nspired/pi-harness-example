@@ -29,6 +29,41 @@
     "OPENROUTER_PROVIDER_ORDER": "",
     "OPENROUTER_MODEL": "z-ai/glm-5.3-flash"
   },
+  // The other Workers in this account, so the harness can call them instead of
+  // re-implementing search, transcription and OpenRouter routing. The names are
+  // the ones the other configs already use, hyphens included, so a binding is
+  // `env["AI-PROXY"]` rather than `env.AI_PROXY`.
+  // Hyphenated names are not valid identifiers, so these go through `unsafe`
+  // bindings; this is the same block the other Workers use for `AI-PROXY`.
+  "unsafe": {
+    "bindings": [
+      {
+        "name": "AIN",
+        "type": "service",
+        "service": "truth",
+        "environment": "production",
+        "entrypoint": "default"
+      },
+      {
+        "name": "AI-PROXY",
+        "type": "service",
+        "service": "ai-proxy",
+        "environment": "production"
+      },
+      {
+        "name": "ORPROXY",
+        "type": "service",
+        "service": "orproxy",
+        "environment": "production"
+      },
+      {
+        "name": "TRUE-ADMIN",
+        "type": "service",
+        "service": "truth-engine",
+        "environment": "production"
+      }
+    ]
+  },
   // Real Chromium for web search, so a rate-limited page can still be read.
   // Needs the Workers Paid plan.
   "browser": { "binding": "BROWSER" },

@@ -254,6 +254,30 @@ describe("the web search extension", () => {
     expect(requests.some((url) => url.includes("bing.com"))).toBe(true);
   });
 
+  it("tries a second SearXNG instance when the first is asleep", async () => {
+    const requests: string[] = [];
+    const extension = createWebSearchExtension(
+      "https://asleep.example, https://awake.example",
+      {
+        fetch: async (input) => {
+          const url = String(input);
+          requests.push(url);
+          if (url.includes("asleep.example")) {
+            return new Response("waking up", { status: 503 });
+          }
+          return jsonResponse({
+            results: [{ title: "From the second instance", url: "https://b.example" }]
+          });
+        }
+      }
+    );
+
+    const result = await run(extension, { query: "example" });
+
+    expect(text(result)).toContain("From the second instance");
+    expect(requests.some((url) => url.includes("awake.example"))).toBe(true);
+  });
+
   it("says so when every backend legitimately finds nothing", async () => {
     const extension = createWebSearchExtension(undefined, {
       fetch: async () => htmlResponse("<html><body>No results found</body></html>")

@@ -364,10 +364,11 @@ function createBingProvider(doFetch: typeof fetch): Provider {
 function createSearxngProvider(
   base: string,
   options: WebSearchOptions,
-  doFetch: typeof fetch
+  doFetch: typeof fetch,
+  name = "searxng"
 ): Provider {
   return {
-    name: "searxng",
+    name,
     timeoutMs: options.searxngTimeoutMs ?? DEFAULT_SEARXNG_TIMEOUT_MS,
     async search(query, limit, signal, filters) {
       let endpoint: URL;
@@ -568,11 +569,21 @@ export function createSearchProviders(
   instanceUrl: string | undefined,
   options: WebSearchOptions = {}
 ): Provider[] {
-  const base = normalizeInstance(instanceUrl);
   const doFetch = options.fetch ?? fetch;
   const providers: Provider[] = [];
-  if (base !== null) {
-    providers.push(createSearxngProvider(base, options, doFetch));
+  // `SEARXNG_URL` may name several instances, tried in the order written: a
+  // free instance sleeps, and a second one answers while the first boots.
+  for (const [index, instance] of (instanceUrl ?? "").split(",").entries()) {
+    const base = normalizeInstance(instance);
+    if (base === null) continue;
+    providers.push(
+      createSearxngProvider(
+        base,
+        options,
+        doFetch,
+        index === 0 ? "searxng" : `searxng-${index + 1}`
+      )
+    );
   }
   if (options.cloudflare) {
     providers.push(createCloudflareProvider(options.cloudflare));
