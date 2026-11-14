@@ -86,6 +86,7 @@ before repeating one, and when a line here contradicts the environment, the line
 is wrong: say so and fix it in the same change.
 
 As of the restore of `f981372` (`dfdfa31`), the tree has no `src/audit.ts`, no
-`/v1/*` routes, no `/api/assistant`, no `src/agent-protocol.ts` and no
-`src/extensions/agents.ts`, and `wrangler.jsonc` has no sibling service
-bindings. Do not describe or assume any of it without checking first.
+`/v1/*` routes, no `src/agent-protocol.ts` and no `src/extensions/agents.ts`,
+and `wrangler.jsonc` has no sibling service bindings. `/api/assistant` does
+exist: `src/server.ts` answers it as a worker-to-worker POST door (one message
+in, one answer out). Do not describe or assume the rest without checking first.
