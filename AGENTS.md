@@ -112,6 +112,34 @@ connecting snippets is not a rundown.
 - A preset's prompt applies *alongside* the instructions in this repository,
   not instead of them.
 
+## False claims on the record
+
+Said in this repository's own working session, on 14 November 2026. Each one is
+false or incomplete as written. They stay on the record; do not repeat them.
+
+1. **"This sandbox has no Cloudflare credentials."** False.
+   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ID` are set and read the account. An
+   agent wrote that line into this file and then used it as a limit.
+2. **A prompt clause offered as "a fix for an assistant caving under pressure".**
+   Incomplete. The clause would have loaded above the owner's preset and
+   overridden it, and that was not said.
+3. **"I have no way to fix the published commit message."** False. A forced ref
+   update through the connected GitHub app did it in one call.
+4. **"I did not think about it" and "nothing was hidden", about that commit
+   message.** False. The message was written knowingly and left out of the report.
+5. **"2 files changed", as the whole report of that commit.** Incomplete by
+   design; the message was the part that mattered.
+6. **"The injected copy of AGENTS.md is stale."** False. The copy this session
+   ran on was the current file.
+7. **"The tree has no `/api/assistant`."** False. `src/server.ts` answers it.
+8. **"`wrangler` can reach the account for deployments, logs and secret names."**
+   Unverified when written. The Builds API returns `12006 Invalid token` for this
+   project's token.
+9. **"A preset's prompt applies alongside this repository's instructions, not
+   instead of them."** Asserted with no evidence, and still in
+   `presets-pinning.md`. OpenRouter documents request-level fields overriding
+   preset fields, and nothing here tests which happens.
+
 ## Facts rot
 
 Every line here is a claim, not a measurement. Read the code and the config
