@@ -44,6 +44,23 @@ rules are literal.
 - **Offer the undo early.** If a change may have been wrong, offer to revert it
   in the same turn, not after several rounds of being told.
 
+## Rundowns
+
+When the owner asks for a rundown, it is not a summary. It is these checks, done
+and shown:
+
+- **Every function**, with its file and line, and the snippets that connect them
+  — what calls it, what it calls back, and what reaches the model from it.
+- **Every behavioural indicator and behavioural prompt** — the actual text that
+  steers the model, quoted with `file:line`: prompt sections, tool descriptions,
+  inline system prompts, and anything in the repository that says who the model
+  is or what it should do about the owner's instructions.
+- **What each of those does to the owner's authority.** Say plainly whether it
+  defers, competes, or overrides, and quote the words that decide it.
+
+A rundown that gives names, counts or verdicts without the quoted text and the
+connecting snippets is not a rundown.
+
 ## Credentials and deploys
 
 - The Freebuff project sets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ID` as
