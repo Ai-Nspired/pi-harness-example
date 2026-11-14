@@ -33,49 +33,59 @@ rules are literal.
 - **Offer the undo early.** If a change may have been wrong, offer to revert it
   in the same turn, not after several rounds of being told.
 
-## Deploy flow
+## Credentials and deploys
 
-- GitHub is the source of truth: `Ai-N-spired`-style repo `Ai-Nspired/pi-harness-example`,
-  branch `main`.
-- Cloudflare is connected to that repository, so **pushing to `main` builds and
-  deploys the Worker**. A push is the deploy; there is no separate step for the
-  owner to perform.
-- This sandbox has no Cloudflare credentials, so `wrangler deploy` cannot run
-  here. Do not attempt it. The connected build is what ships the code.
+- The Freebuff project sets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ID` as
+  project secrets, and the workspace has them. Use them where a tool needs
+  them; never print, echo, log or copy their values.
+- GitHub is the source of truth: `Ai-Nspired/pi-harness-example`, branch `main`.
+  **A push is the deploy** — Cloudflare Workers Builds picks up `main`.
+- `wrangler` can reach the account from here. Use it to read and diagnose:
+  deployments, logs, secret names. Do not deploy directly unless the owner asks,
+  because a direct deploy and a push can race.
+- Never tell the owner this sandbox has no Cloudflare access. An earlier version
+  of this file said so, it was wrong, and it cost them time.
 
-## What that means for every change
+## Every change
 
-1. Make the change and verify it here: `node_modules/.bin/tsc --noEmit`,
+1. Install only if needed: `pnpm install --frozen-lockfile`.
+2. Verify: `node_modules/.bin/tsc --noEmit`,
    `node_modules/.bin/vitest run --config src/tests/vitest.config.ts`,
-   `node_modules/.bin/vite build`. Never leave unverified work committed.
-2. Commit with a clear message and push to `main` with the repository's
-   `cloud_git` tool.
-3. Report the commit hash and that the connected build is deploying it, plus
-   where to look (Cloudflare dashboard → Workers & Pages → the Worker →
-   Deployments, then the Worker URL).
+   `node_modules/.bin/vite build`.
+3. Give the diff receipt: files, and the changed lines.
+4. Commit, push to `main` with `cloud_git`.
+5. Report the commit hash, the Cloudflare build, and where to look.
 
 ## Testing from a phone
 
-- Watch the build under **Deployments** in the Worker's dashboard page, then
-  open the Worker URL.
+- Cloudflare dashboard → Workers & Pages → the Worker → **Deployments** → the
+  Worker URL.
 - pi fixes a session's tool list when the session is created, so after a deploy
-  use **New session** to pick up new tools.
-- Report failures by pasting the message the app shows; do not ask the owner to
-  reproduce them in a terminal.
+  use **New session**.
+- Ask for the message the app shows; never for terminal output.
 
-## Project facts worth remembering
+## What this app is
 
-- `web_search` is a native pi-durable extension (`src/extensions/web-search.ts`).
-  `SEARXNG_URL` is our own instance on Render
-  (`https://searing-render.onrender.com`), tried first; then Cloudflare Web
-  Search (Ceramic.ai through `env.AI.websearch`, $0.25 per 1,000 searches from
-  AI Gateway credits, disabled with `CLOUDFLARE_SEARCH=off`), Bing over HTTP,
-  Bing through a real Chromium via Browser Rendering (`BROWSER` binding,
-  Workers Paid), then DuckDuckGo HTML and Lite. DuckDuckGo blocks Cloudflare
-  egress, including from Browser Rendering, so it is only a last resort. The
-  Render free instance sleeps, so the first search after idle may fall through
-  to Cloudflare Web Search.
-- Successful searches are cached for five minutes; a backend that answers with
-  a rate limit is skipped for one minute.
-- `pnpm-lock.yaml` is committed; `agents` is pinned to the 0.32 series because
-  newer releases peer against pi 1.5 while the pi packages are pinned to 1.4.0.
+- `src/server.ts` — `PiAgent`: the harness, the single Lifecycle wake job, the
+  retry and compaction settings, and the defaults a new session starts with.
+- `src/workspace.ts` — the model's file and `exec` tools, and the descriptions
+  that go with them.
+- `src/extensions/web-search.ts` — the `web_search` tool, its prompt section
+  and its backends.
+- **Presets** — model, provider routing, parameters and system prompt — live in
+  the OpenRouter dashboard. `OPENROUTER_PRESETS` and
+  `OPENROUTER_DEFAULT_PRESET` in `wrangler.jsonc` only name them, and editing a
+  preset needs no deploy.
+- A preset's prompt applies *alongside* the instructions in this repository,
+  not instead of them.
+
+## Facts rot
+
+Every line here is a claim, not a measurement. Read the code and the config
+before repeating one, and when a line here contradicts the environment, the line
+is wrong: say so and fix it in the same change.
+
+As of the restore of `f981372` (`dfdfa31`), the tree has no `src/audit.ts`, no
+`/v1/*` routes, no `/api/assistant`, no `src/agent-protocol.ts` and no
+`src/extensions/agents.ts`, and `wrangler.jsonc` has no sibling service
+bindings. Do not describe or assume any of it without checking first.

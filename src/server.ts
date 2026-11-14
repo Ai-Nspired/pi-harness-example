@@ -116,8 +116,13 @@ function cloudflareSearchEnabled(env: Env): boolean {
   return (env.CLOUDFLARE_SEARCH ?? "on").trim().toLowerCase() !== "off";
 }
 
-const PREAMBLE =
-  "You are a concise playground assistant. You have a durable workspace at /workspace: read, write, edit, delete, list (ls), find and grep files there, and run JavaScript modules in it with exec, which can also use git. Paths are absolute. Use tools whenever they can answer the request, and explain their results plainly.";
+/**
+ * What the model needs in order to use the workspace at all: where it is, what
+ * it holds, and that paths are absolute. Nothing about who it is, what to
+ * prioritise, or when to act — those belong to the owner's preset.
+ */
+const WORKSPACE_NOTE =
+  "You have a durable workspace at /workspace: read, write, edit, delete, list (ls), find and grep files there, and run JavaScript modules in it with exec, which can also use git. Paths are absolute.";
 
 /** Playable pi session backed by one Durable Object. */
 export class PiAgent extends DurableObject<Env> {
@@ -149,7 +154,7 @@ export class PiAgent extends DurableObject<Env> {
       // pi's own extension: the system prompt and the workspace tools.
       this.registry.install({
         name: "playground",
-        sections: [{ key: "preamble", render: () => PREAMBLE, tag: false }],
+        sections: [{ key: "workspace", render: () => WORKSPACE_NOTE, tag: false }],
         tools: createWorkspaceTools(this.workspace)
       });
       // Web search: SearXNG when configured, Cloudflare Web Search when it
