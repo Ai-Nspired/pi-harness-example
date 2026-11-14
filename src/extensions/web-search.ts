@@ -16,6 +16,10 @@ const SNIPPET_CHARS = 400;
 const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
 /** How long a backend that answered with a rate limit is skipped. */
 const DEFAULT_COOLDOWN_MS = 60_000;
+/** Searches one session may run before the tool stops calling out. */
+const DEFAULT_MAX_SEARCHES = 6;
+/** The search budget refills over this window, in milliseconds. */
+const DEFAULT_SEARCH_WINDOW_MS = 10 * 60_000;
 /** Errors that mean "slow down" rather than "this backend is broken". */
 const RATE_LIMIT = /\b(429|202|403)\b|rate.?limit|too many|challenge|anomaly/i;
 
@@ -69,6 +73,13 @@ export interface WebSearchOptions {
   cacheTtlMs?: number;
   /** Skip a rate-limited backend for this long, in milliseconds. 0 disables. */
   cooldownMs?: number;
+  /**
+   * Searches one session may run inside `searchWindowMs`, so a model cannot
+   * search its way around a question it cannot answer. 0 lifts the cap.
+   */
+  maxSearches?: number;
+  /** Window the search budget refills over, in milliseconds. */
+  searchWindowMs?: number;
 }
 
 const SearchParameters = Type.Object({
@@ -603,6 +614,25 @@ export function createWebSearchExtension(
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
   const cache = new Map<string, { text: string; expires: number }>();
   const cooling = new Map<string, number>();
+  const maxSearches = options.maxSearches ?? DEFAULT_MAX_SEARCHES;
+  const searchWindowMs = options.searchWindowMs ?? DEFAULT_SEARCH_WINDOW_MS;
+  /** When each search that reached a backend was spent, oldest first. */
+  const spent: number[] = [];
+  /**
+   * The answer each query already produced, keyed on the query alone. Asking
+   * the same thing again returns that answer instead of searching again, which
+   * is what a model does when it dislikes the results it got.
+   */
+  const answered = new Map<string, string>();
+
+  /** Searches left in the window; Infinity when the cap is lifted. */
+  const budgetLeft = (now: number): number => {
+    if (maxSearches <= 0) return Number.POSITIVE_INFINITY;
+    while (spent.length > 0 && (spent[0] ?? 0) <= now - searchWindowMs) {
+      spent.shift();
+    }
+    return maxSearches - spent.length;
+  };
 
   const defaultResults = Math.min(
     Math.max(options.defaultResults ?? DEFAULT_RESULTS, 1),
@@ -620,6 +650,24 @@ export function createWebSearchExtension(
     async execute({ query, maxResults, category, timeRange }, _api, context) {
       const limit = Math.min(Math.max(maxResults ?? defaultResults, 1), MAX_RESULTS);
       const key = [query, limit, category ?? "", timeRange ?? ""].join("\u0000");
+      // A question already answered is never searched twice: the model gets
+      // the earlier answer back, whatever cache lifetime is configured.
+      const asked = collapse(query).toLowerCase();
+      const earlier = answered.get(asked);
+      if (earlier !== undefined) {
+        return textResult(
+          `${earlier}\n\nThat query was already searched in this session, and this is the answer it gave; nothing was searched again. Work from these results or ask something genuinely different.`
+        );
+      }
+      if (budgetLeft(Date.now()) <= 0) {
+        const minutes = Math.round(searchWindowMs / 60_000);
+        return textResult(
+          `Search budget spent: ${maxSearches} searches in the last ${minutes} ${
+            minutes === 1 ? "minute" : "minutes"
+          }. Answer from the results you already have, and say plainly what you could not verify.`
+        );
+      }
+
       if (cacheTtlMs > 0) {
         const cached = cache.get(key);
         if (cached && cached.expires > Date.now()) return textResult(cached.text);
@@ -629,6 +677,9 @@ export function createWebSearchExtension(
       const errors: string[] = [];
       /** Backends that answered properly but had nothing to show. */
       const empties: string[] = [];
+      // Counted before any network work: a backend that fails still spent the
+      // budget, so a broken chain cannot be retried forever.
+      spent.push(Date.now());
       for (const provider of providers) {
         if ((cooling.get(provider.name) ?? 0) > Date.now()) {
           errors.push(`${provider.name}: skipped after a rate limit`);
@@ -651,6 +702,7 @@ export function createWebSearchExtension(
             continue;
           }
           const answer = formatOutcome(query, outcome, limit);
+          answered.set(asked, answer);
           if (cacheTtlMs > 0) {
             cache.set(key, { text: answer, expires: Date.now() + cacheTtlMs });
           }
