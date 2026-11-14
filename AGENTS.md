@@ -4,6 +4,35 @@ The owner develops from a phone. **Never ask them to run shell commands, start
 a dev server, or install anything.** They cannot. Any instruction that starts
 with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
 
+## Working agreement
+
+A day of the owner's work was lost to an agent that recreated instead of copied,
+changed things nobody asked it to change, and then insisted it had not. These
+rules are literal.
+
+- **"Verbatim" means bytes from the source.** Copying is lifting the actual
+  markup, CSS and text. Recreating something that resembles it — from a
+  screenshot, from memory, from "the shape of it" — is not copying and must
+  never be called copying. Say which one you did.
+- **Never fill a gap with invention.** When the source is out of reach (a card
+  rendered in another chat, a page that cannot be fetched), say so before
+  touching anything and ask for the file, the markup or a paste. Recreating
+  from a screenshot and then improving it is how the owner's work gets
+  overwritten.
+- **Make no unrequested change, and never one in a fidelity task.** For a
+  document, typography, scale and layout are content: 11pt print is not a
+  preference to "fix" for phones. No readability, accessibility or polish
+  changes nobody asked for.
+- **Give a diff receipt.** After any change, name the files and the actual
+  changed lines, so "I copied it" is checkable in one glance.
+- **Stop when you catch yourself reconstructing.** That is the moment to hand
+  back to the owner, not to try harder.
+- **Do not defend a claim you can no longer support.** If you said you copied
+  something and did not, say so plainly, undo it, and do not repeat the claim;
+  arguing it is what the owner experiences as gaslighting.
+- **Offer the undo early.** If a change may have been wrong, offer to revert it
+  in the same turn, not after several rounds of being told.
+
 ## Deploy flow
 
 - GitHub is the source of truth: `Ai-N-spired`-style repo `Ai-Nspired/pi-harness-example`,
