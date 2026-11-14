@@ -14,6 +14,7 @@ import { WebSockets } from "agents/websockets";
 import { extractDocument, uploadName } from "./extract";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
+import { createMemoryExtension, recordMessage } from "./memory";
 import {
   createOpenRouterSetup,
   presetModelId,
@@ -151,6 +152,8 @@ export class PiAgent extends DurableObject<Env> {
   readonly registry = createRegistry();
   readonly harness = new PiHarness({
     harness: async ({ storage, context, onWake }) => {
+      // Notes the owner asked to keep, from KV, in every session.
+      this.registry.install(createMemoryExtension(this.env.DB));
       // pi's own extension: the system prompt and the workspace tools.
       this.registry.install({
         name: "playground",
@@ -222,7 +225,8 @@ export class PiAgent extends DurableObject<Env> {
           entries: this.openrouter.entries,
           baseModelId: this.openrouter.baseModelId
         }
-      : undefined
+      : undefined,
+    (text) => recordMessage(this.env.DB, text)
   );
   readonly webSockets = new WebSockets(this.sockets.options());
   readonly lifecycle = Lifecycle.install(this)
@@ -298,6 +302,8 @@ export class PiAgent extends DurableObject<Env> {
       });
       model = id;
     }
+    // The owner's words are recorded whether or not the model files a note.
+    await recordMessage(this.env.DB, text).catch(() => {});
     const answer = await this.harness.prompt(text);
     // `text` is absent when the run ended without a final assistant message.
     return { text: answer.text ?? "", model };

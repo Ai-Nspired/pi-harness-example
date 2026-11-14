@@ -29,6 +29,16 @@
     "OPENROUTER_PROVIDER_ORDER": "",
     "OPENROUTER_MODEL": "z-ai/glm-5.3-flash"
   },
+  // Notes the model files with the `remember` tool, every message the owner
+  // sends, and the prompt section that reads both back. D1, not the Durable
+  // Object's storage, so the notes outlive any one object.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pi-harness-memory",
+      "database_id": "da5a9d51-5715-4729-b6fa-43f7b0108258"
+    }
+  ],
   // Real Chromium for web search, so a rate-limited page can still be read.
   // Needs the Workers Paid plan.
   "browser": { "binding": "BROWSER" },

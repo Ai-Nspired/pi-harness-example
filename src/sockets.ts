@@ -10,6 +10,7 @@ import {
   type PiHarness,
   type PiSessionId
 } from "agents/harness/pi";
+import { textOf } from "./memory";
 import { resolvePresetModel, type PresetEntry } from "./openrouter";
 
 /** The presets a socket may switch to, and the model to fall back to. */
@@ -74,18 +75,22 @@ export class PiSessionSockets {
    * an empty choice falls back to. Absent when there is no OpenRouter key.
    */
   readonly #presets: PresetSwitch | undefined;
+  /** Records what the owner sent, before the model sees it. */
+  readonly #record: ((text: string) => Promise<void>) | undefined;
 
   constructor(
     harness: PiHarness,
     /** The registry pi was opened with, for the tool list sent on connect. */
     registry: RegistryReader,
     getWebSockets: (tag?: string) => WebSocket[],
-    presets?: PresetSwitch
+    presets?: PresetSwitch,
+    record?: (text: string) => Promise<void>
   ) {
     this.#harness = harness;
     this.#registry = registry;
     this.#getWebSockets = getWebSockets;
     this.#presets = presets;
+    this.#record = record;
   }
 
   options(): WebSocketsOptions {
@@ -187,11 +192,17 @@ export class PiSessionSockets {
   ): Promise<JsonValue> {
     const handle = this.#harness.session(session);
     switch (message.type) {
-      case "submit":
+      case "submit": {
+        // Written before the run starts, so a session that ends badly still
+        // leaves the owner's words on record.
+        if (this.#record) {
+          await this.#record(textOf(message.input)).catch(() => {});
+        }
         return await handle.submit(message.input, {
           ...(message.whenBusy ? { whenBusy: message.whenBusy } : {}),
           ...(message.operationId ? { operationId: message.operationId } : {})
         });
+      }
       case "abort":
         return await handle.abort();
       case "reset":

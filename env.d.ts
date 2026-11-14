@@ -4,6 +4,7 @@ interface __BaseEnv_Env {
   LOADER: WorkerLoader;
   AI: Ai;
   BROWSER: Fetcher;
+  DB: D1Database;
   SEARXNG_URL: string;
   CLOUDFLARE_SEARCH?: string;
   AI_GATEWAY_ID?: string;
