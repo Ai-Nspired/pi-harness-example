@@ -3,11 +3,8 @@ import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 
 /** How long one backend may take before the next one is tried. */
 const DEFAULT_TIMEOUT_MS = 10_000;
-/**
- * SearXNG gets longer: a sleeping free instance answered 503 for 35 seconds
- * while it booted (measured 2026-11-12), so anything shorter skips our own index.
- */
-const DEFAULT_SEARXNG_TIMEOUT_MS = 45_000;
+/** SearXNG gets longer: a sleeping instance answers 503 until it finishes booting. */
+const DEFAULT_SEARXNG_TIMEOUT_MS = 25_000;
 /** Results returned when the model does not ask for a count. */
 const DEFAULT_RESULTS = 5;
 /** The most results one call may ask for. */
@@ -367,11 +364,10 @@ function createBingProvider(doFetch: typeof fetch): Provider {
 function createSearxngProvider(
   base: string,
   options: WebSearchOptions,
-  doFetch: typeof fetch,
-  name = "searxng"
+  doFetch: typeof fetch
 ): Provider {
   return {
-    name,
+    name: "searxng",
     timeoutMs: options.searxngTimeoutMs ?? DEFAULT_SEARXNG_TIMEOUT_MS,
     async search(query, limit, signal, filters) {
       let endpoint: URL;
@@ -572,21 +568,11 @@ export function createSearchProviders(
   instanceUrl: string | undefined,
   options: WebSearchOptions = {}
 ): Provider[] {
+  const base = normalizeInstance(instanceUrl);
   const doFetch = options.fetch ?? fetch;
   const providers: Provider[] = [];
-  // `SEARXNG_URL` may name several instances, tried in the order written: a
-  // free instance sleeps, and a second one answers while the first boots.
-  for (const [index, instance] of (instanceUrl ?? "").split(",").entries()) {
-    const base = normalizeInstance(instance);
-    if (base === null) continue;
-    providers.push(
-      createSearxngProvider(
-        base,
-        options,
-        doFetch,
-        index === 0 ? "searxng" : `searxng-${index + 1}`
-      )
-    );
+  if (base !== null) {
+    providers.push(createSearxngProvider(base, options, doFetch));
   }
   if (options.cloudflare) {
     providers.push(createCloudflareProvider(options.cloudflare));

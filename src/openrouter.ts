@@ -146,13 +146,6 @@ export function baseModelId(id: string): string {
  * `samplingParams` are merged into an OpenAI-compatible request body as-is,
  * which is where OpenRouter reads `provider.order`.
  */
-/**
- * OpenRouter's own web search is off on every request. Search belongs to the
- * account's SearXNG instance: one index, one result shape, and no per-request
- * charge from a provider that also decides when to search.
- */
-export const NO_PROVIDER_SEARCH = [{ id: "web", enabled: false }] as const;
-
 export function withProviderPin<TApi extends Api>(
   model: Model<TApi>,
   pin: ProviderPin
@@ -161,14 +154,8 @@ export function withProviderPin<TApi extends Api>(
   if (pin.order.length > 0) provider.order = [...pin.order];
   if (pin.sort) provider.sort = pin.sort;
   if (pin.maxPrice) provider.max_price = { ...pin.maxPrice };
-  return {
-    ...model,
-    samplingParams: {
-      ...model.samplingParams,
-      ...(Object.keys(provider).length === 0 ? {} : { provider }),
-      plugins: NO_PROVIDER_SEARCH.map((plugin) => ({ ...plugin }))
-    }
-  };
+  if (Object.keys(provider).length === 0) return model;
+  return { ...model, samplingParams: { ...model.samplingParams, provider } };
 }
 
 export function withProviderOrder<TApi extends Api>(

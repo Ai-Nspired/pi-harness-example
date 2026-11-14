@@ -11,24 +11,6 @@ import { PiHarness, ROOT_SESSION } from "agents/harness/pi";
 import { Lifecycle } from "agents/lifecycle";
 import { createAI } from "agents/models/pi-ai";
 import { WebSockets } from "agents/websockets";
-import {
-  AGENT_ERRORS,
-  agentCard,
-  failureBody,
-  parseAgentRequest,
-  responseHeaders,
-  successBody
-} from "./agent-protocol";
-import {
-  AUDIT_CORS,
-  AUDIT_PRESET,
-  auditError,
-  auditSession,
-  auditStreamBody,
-  lastUserMessage,
-  parseAuditRequest
-} from "./audit";
-import { createAgentExtension } from "./extensions/agents";
 import { extractDocument, uploadName } from "./extract";
 import { createSearchProviders, createWebSearchExtension } from "./extensions/web-search";
 import { compactionBudget } from "./compaction";
@@ -41,21 +23,6 @@ import { PiSessionSockets } from "./sockets";
 import { createWorkspaceTools, JAVASCRIPT_BACKEND } from "./workspace";
 
 const MODEL_ID = "@cf/zai-org/glm-5.3-flash";
-/** The sibling Workers this deployment may be bound to, by binding name. */
-const AGENT_BINDINGS = ["AIN", "AI-PROXY", "ORPROXY", "TRUE-ADMIN"] as const;
-
-/** The service bindings this deployment actually has, by name. */
-function serviceBindings(env: Env): Record<string, Fetcher> {
-  const bindings = env as unknown as Record<string, unknown>;
-  const found: Record<string, Fetcher> = {};
-  for (const name of AGENT_BINDINGS) {
-    const value = bindings[name];
-    if (value && typeof (value as Fetcher).fetch === "function") {
-      found[name] = value as Fetcher;
-    }
-  }
-  return found;
-}
 /** Speech to text on the AI binding, so dictation needs no key of its own. */
 const TRANSCRIBE_MODEL = "@cf/openai/whisper-large-v3-turbo";
 /** A dictation longer than this is a mistake, not a message. */
@@ -195,12 +162,6 @@ export class PiAgent extends DurableObject<Env> {
             : undefined
         })
       );
-      // The other Workers, when this deployment is bound to them: the tool takes
-      // a path from the model rather than assuming their APIs.
-      const agents = serviceBindings(this.env);
-      if (Object.keys(agents).length > 0) {
-        this.registry.install(createAgentExtension(agents));
-      }
       const models = this.openModels();
       return Harness.open(
         storage,
@@ -353,102 +314,6 @@ export class PiAgent extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const pathname = new URL(request.url).pathname;
-    if (pathname === "/v1/audit" || pathname.startsWith("/v1/audit/")) {
-      // The Truth Engine's brain. The engine posts a conversation and reads
-      // OpenAI-shaped deltas; op answers on the `truth` preset, in a session
-      // derived from the first message, so the docket read on turn one is
-      // still in context on turn five. Only the thinking moves here: saved
-      // records stay in orproxy, which the engine already links to.
-      if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: AUDIT_CORS });
-      }
-      if (pathname === "/v1/audit") {
-        if (request.method !== "POST") {
-          return auditError(405, "method_not_allowed", "POST the conversation");
-        }
-        let raw: unknown;
-        try {
-          raw = await request.json();
-        } catch {
-          return auditError(400, "invalid_request", "Expected a JSON body");
-        }
-        const parsed = parseAuditRequest(raw);
-        if (!parsed.ok) return auditError(400, "invalid_request", parsed.message);
-
-        // Without a key there are no presets to name; the harness falls back
-        // to Workers AI on its own, so the audit still answers.
-        const setup = createOpenRouterSetup(env);
-        let preset: string | undefined = parsed.request.preset ?? AUDIT_PRESET;
-        if (setup) {
-          if (!resolvePresetModel(setup.entries, preset)) {
-            return auditError(
-              400,
-              "unknown_preset",
-              `Unknown preset ${JSON.stringify(preset)}. Configured: ${
-                setup.presets.join(", ") || "none"
-              }`
-            );
-          }
-        } else {
-          preset = undefined;
-        }
-
-        const session = await auditSession(parsed.request.messages);
-        const message = lastUserMessage(parsed.request.messages);
-        try {
-          const answer = await env.PiAgent.getByName(session).ask(message, preset);
-          console.log("audit answered", {
-            session,
-            preset: preset ?? "workers-ai",
-            audit: parsed.request.audit_id ?? null,
-            characters: answer.text.length
-          });
-          return new Response(auditStreamBody(answer.text, answer.model), {
-            headers: {
-              ...AUDIT_CORS,
-              "content-type": "text/event-stream; charset=utf-8",
-              "cache-control": "no-store"
-            }
-          });
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          console.error("audit failed", { session, message: detail });
-          return auditError(502, "audit_failed", detail);
-        }
-      }
-
-      // `/v1/audit/store` and `/v1/audit/<id>`: pass through to orproxy, so a
-      // saved docket and its permalink keep working exactly as before.
-      const orproxy = serviceBindings(env)["ORPROXY"];
-      if (!orproxy) {
-        return auditError(503, "unavailable", "This deployment has no ORPROXY binding");
-      }
-      try {
-        const search = new URL(request.url).search;
-        const body =
-          request.method === "GET" || request.method === "HEAD"
-            ? undefined
-            : await request.arrayBuffer();
-        const upstream = await orproxy.fetch(
-          new Request(`https://orproxy${pathname}${search}`, {
-            method: request.method,
-            headers: request.headers,
-            body
-          })
-        );
-        const headers = new Headers(upstream.headers);
-        for (const [name, value] of Object.entries(AUDIT_CORS)) headers.set(name, value);
-        headers.set("cache-control", "no-store");
-        return new Response(upstream.body, { status: upstream.status, headers });
-      } catch (error) {
-        return auditError(
-          502,
-          "audit_store_failed",
-          error instanceof Error ? error.message : String(error)
-        );
-      }
-    }
     if (new URL(request.url).pathname === "/api/transcribe") {
       // Dictation: the browser posts the recording, Whisper turns it into text.
       if (request.method === "GET") {
@@ -585,93 +450,54 @@ export default {
         { headers: { "cache-control": "no-store" } }
       );
     }
-    if (new URL(request.url).pathname === "/api/agent-card") {
-      // What a sibling needs in order to configure itself against this agent.
-      return Response.json(agentCard(new URL(request.url).origin), {
-        headers: { "cache-control": "no-store" }
-      });
-    }
     if (new URL(request.url).pathname === "/api/assistant") {
-      // The worker-to-worker door: one envelope in, one envelope out, on a
-      // preset the caller names or on the session's own. Reached through a
-      // service binding or `getByName`, so a caller needs no key and no socket.
-      // The shape is `src/agent-protocol.ts`, and every sibling speaks it.
+      // The worker-to-worker door: one message in, one answer out, on a preset
+      // the caller names or on the session's own. Reached through a service
+      // binding or `getByName`, so a caller needs no key and no socket.
       if (request.method !== "POST") {
-        return Response.json(
-          failureBody(crypto.randomUUID(), AGENT_ERRORS.invalidRequest, "POST a JSON body"),
-          { status: 405 }
-        );
+        return Response.json({ error: "POST a JSON body" }, { status: 405 });
       }
-      let raw: unknown;
+      let body: { message?: unknown; preset?: unknown; session?: unknown };
       try {
-        raw = await request.json();
+        body = (await request.json()) as typeof body;
       } catch {
-        return Response.json(
-          failureBody(
-            crypto.randomUUID(),
-            AGENT_ERRORS.invalidRequest,
-            "Expected a JSON body"
-          ),
-          { status: 400 }
-        );
+        return Response.json({ error: "Expected a JSON body" }, { status: 400 });
       }
-      const parsed = parseAgentRequest(raw, request.headers);
-      if (!parsed.ok) {
-        return Response.json(
-          failureBody(parsed.requestId, parsed.code, parsed.message),
-          {
-            status: parsed.code === AGENT_ERRORS.unsupportedVersion ? 426 : 400,
-            headers: responseHeaders(parsed.requestId)
-          }
-        );
+      const message = typeof body.message === "string" ? body.message.trim() : "";
+      if (!message) {
+        return Response.json({ error: "Pass a message" }, { status: 400 });
       }
-
-      const setup = createOpenRouterSetup(env);
-      if (parsed.preset !== undefined) {
+      const preset = typeof body.preset === "string" ? body.preset : undefined;
+      if (preset !== undefined) {
+        const setup = createOpenRouterSetup(env);
         const id =
-          parsed.preset.trim() === ""
+          preset.trim() === ""
             ? setup?.baseModelId
-            : resolvePresetModel(setup?.entries ?? [], parsed.preset);
+            : resolvePresetModel(setup?.entries ?? [], preset);
         if (!id) {
           return Response.json(
-            failureBody(
-              parsed.requestId,
-              AGENT_ERRORS.unknownPreset,
-              `Unknown preset ${JSON.stringify(parsed.preset)}. Configured: ${
-                setup?.presets.join(", ") || "none"
-              }`
-            ),
-            { status: 400, headers: responseHeaders(parsed.requestId) }
+            {
+              error: `Unknown preset ${JSON.stringify(preset)}`,
+              presets: setup?.presets ?? []
+            },
+            { status: 400 }
           );
         }
       }
-
+      const session =
+        typeof body.session === "string" && body.session.trim()
+          ? body.session.trim()
+          : "assistant";
       try {
-        const answer = await env.PiAgent.getByName(parsed.session).ask(
-          parsed.message,
-          parsed.preset
-        );
-        console.log("agent request", {
-          from: parsed.from,
-          requestId: parsed.requestId,
-          session: parsed.session,
-          preset: parsed.preset ?? "session"
-        });
+        const answer = await env.PiAgent.getByName(session).ask(message, preset);
         return Response.json(
-          successBody({
-            requestId: parsed.requestId,
-            session: parsed.session,
-            text: answer.text,
-            model: answer.model
-          }),
-          { headers: responseHeaders(parsed.requestId) }
+          { session, ...answer },
+          { headers: { "cache-control": "no-store" } }
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("agent request failed", { requestId: parsed.requestId, message });
         return Response.json(
-          failureBody(parsed.requestId, AGENT_ERRORS.unavailable, message),
-          { status: 500, headers: responseHeaders(parsed.requestId) }
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: 500 }
         );
       }
     }
@@ -685,7 +511,6 @@ export default {
           model: setup?.defaultModelId ?? MODEL_ID,
           provider: setup ? "openrouter" : "workers-ai",
           presets: setup?.presets ?? [],
-          agents: Object.keys(serviceBindings(env)),
           note: setup
             ? undefined
             : "OPENROUTER_API_KEY is not set, so presets are not used"

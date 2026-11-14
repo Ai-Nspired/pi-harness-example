@@ -38,9 +38,7 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
 
 - `web_search` is a native pi-durable extension (`src/extensions/web-search.ts`).
   `SEARXNG_URL` is our own instance on Render
-  (`https://searing-render.onrender.com`), tried first. `SEARXNG_URL` may list
-  several instances separated by commas, in the order they should be tried, so
-  a sleeping instance is skipped by a second one rather than by a scraper; then Cloudflare Web
+  (`https://searing-render.onrender.com`), tried first; then Cloudflare Web
   Search (Ceramic.ai through `env.AI.websearch`, $0.25 per 1,000 searches from
   AI Gateway credits, disabled with `CLOUDFLARE_SEARCH=off`), Bing over HTTP,
   Bing through a real Chromium via Browser Rendering (`BROWSER` binding,
@@ -50,19 +48,5 @@ with `git`, `pnpm`, `npm`, or `wrangler` is the wrong answer for them.
   to Cloudflare Web Search.
 - Successful searches are cached for five minutes; a backend that answers with
   a rate limit is skipped for one minute.
-- Workers in this account talk to each other with `AGENT-PROTOCOL.md`
-  (`src/agent-protocol.ts`): `POST /api/assistant`, `GET /api/agent-card`,
-  `x-agent`, `x-agent-protocol`, `x-agent-request-id`. This Worker is `op`, and
-  `call_agent` reaches the service bindings it is given.
-- The Truth Engine (`i.nspired.cc/engine`) speaks orproxy's audit contract:
-  `POST /v1/audit` → SSE `choices[0].delta.content`, `POST /v1/audit/store` and
-  `GET /v1/audit/<id>` for the saved record. `src/audit.ts` and the `/v1/*`
-  route answer in that shape here, on the `truth` preset, so the engine's base URL
-  is the only thing that has to change to have op do the thinking. Saved
-  records are still proxied to `ORPROXY`; the audit session is keyed on the
-  first user message, not on `audit_id` (the engine only learns that after it
-  stores the first answer).
-- `/v1/*` is in `assets.run_worker_first`; a new API prefix must be added there
-  too, or the static assets answer it first.
 - `pnpm-lock.yaml` is committed; `agents` is pinned to the 0.32 series because
   newer releases peer against pi 1.5 while the pi packages are pinned to 1.4.0.

@@ -62,18 +62,13 @@ describe("preset entries", () => {
 describe("provider pinning", () => {
   const base = openrouterProvider().getModels()[0]!;
 
-  it("adds no routing when none is configured, but still turns provider search off", () => {
-    expect(withProviderOrder(base, []).samplingParams).toEqual({
-      plugins: [{ id: "web", enabled: false }]
-    });
+  it("leaves a model untouched when no order is configured", () => {
+    expect(withProviderOrder(base, [])).toBe(base);
   });
 
   it("puts the order where OpenAI-compatible requests read it", () => {
     const pinned = withProviderOrder(base, ["Wafer", "Z.ai"]);
-    expect(pinned.samplingParams).toEqual({
-      provider: { order: ["Wafer", "Z.ai"] },
-      plugins: [{ id: "web", enabled: false }]
-    });
+    expect(pinned.samplingParams).toEqual({ provider: { order: ["Wafer", "Z.ai"] } });
   });
 
   it("parses a price ceiling and rejects nonsense", () => {
@@ -91,8 +86,7 @@ describe("provider pinning", () => {
     });
 
     expect(pinned.samplingParams).toEqual({
-      provider: { sort: "price", max_price: { prompt: 0.12, completion: 0.4 } },
-      plugins: [{ id: "web", enabled: false }]
+      provider: { sort: "price", max_price: { prompt: 0.12, completion: 0.4 } }
     });
   });
 });
@@ -207,10 +201,7 @@ describe("the OpenRouter provider", () => {
     })!;
 
     const preset = setup.provider.getModels().find((model) => model.id === "@preset/fast");
-    expect(preset?.samplingParams).toEqual({
-      provider: { order: ["Wafer"] },
-      plugins: [{ id: "web", enabled: false }]
-    });
+    expect(preset?.samplingParams).toEqual({ provider: { order: ["Wafer"] } });
   });
 
   it("routes by price under a ceiling on the configured model", () => {
@@ -223,8 +214,7 @@ describe("the OpenRouter provider", () => {
 
     const preset = setup.provider.getModels().find((model) => model.id === "@preset/fast");
     expect(preset?.samplingParams).toEqual({
-      provider: { sort: "price", max_price: { prompt: 0.12, completion: 0.4 } },
-      plugins: [{ id: "web", enabled: false }]
+      provider: { sort: "price", max_price: { prompt: 0.12, completion: 0.4 } }
     });
   });
 
@@ -237,10 +227,7 @@ describe("the OpenRouter provider", () => {
     })!;
 
     const preset = setup.provider.getModels().find((model) => model.id === "z-ai/glm-4.7@preset/deep");
-    expect(preset?.samplingParams).toEqual({
-      provider: { sort: "price" },
-      plugins: [{ id: "web", enabled: false }]
-    });
+    expect(preset?.samplingParams).toEqual({ provider: { sort: "price" } });
   });
 
   it("resolves preset auth from the Worker environment", async () => {
@@ -260,26 +247,5 @@ describe("resolving a preset for the toggle", () => {
       "z-ai/glm-4.7@preset/cheap"
     );
     expect(resolvePresetModel(entries, "missing")).toBeUndefined();
-  });
-});
-
-describe("provider search is off", () => {
-  it("disables OpenRouter's web plugin on every preset model", () => {
-    const setup = createOpenRouterSetup({
-      OPENROUTER_API_KEY: "test-key",
-      OPENROUTER_PRESETS: "truth, z-ai/glm-4.7@preset/cheap",
-      OPENROUTER_DEFAULT_PRESET: "truth"
-    });
-    expect(setup).toBeDefined();
-
-    const chosen = setup!.provider
-      .getModels()
-      .filter((model) => model.id.startsWith("@preset/") || model.id.includes("@preset/"));
-    expect(chosen.length).toBe(2);
-    for (const model of chosen) {
-      expect((model.samplingParams as { plugins?: unknown }).plugins).toEqual([
-        { id: "web", enabled: false }
-      ]);
-    }
   });
 });
