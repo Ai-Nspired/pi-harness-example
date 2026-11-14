@@ -40,9 +40,14 @@ rules are literal.
   them; never print, echo, log or copy their values.
 - GitHub is the source of truth: `Ai-Nspired/pi-harness-example`, branch `main`.
   **A push is the deploy** — Cloudflare Workers Builds picks up `main`.
-- `wrangler` can reach the account from here. Use it to read and diagnose:
-  deployments, logs, secret names. Do not deploy directly unless the owner asks,
-  because a direct deploy and a push can race.
+- Build and deploy state comes from the GitHub check run on the commit, above
+  everything else. The Cloudflare API can also read the live deployments and
+  their version ids, which is how to confirm what is actually serving.
+- The project's Cloudflare token is rejected by the Builds API
+  (`12006 Invalid token`). Build logs are not reachable from here; do not plan
+  around reading them.
+- Do not deploy directly unless the owner asks, because a direct deploy and a
+  push can race.
 - Never tell the owner this sandbox has no Cloudflare access. An earlier version
   of this file said so, it was wrong, and it cost them time.
 
