@@ -74,8 +74,10 @@ connecting snippets is not a rundown.
 - The project's Cloudflare token is rejected by the Builds API
   (`12006 Invalid token`). Build logs are not reachable from here; do not plan
   around reading them.
-- Do not deploy directly unless the owner asks, because a direct deploy and a
-  push can race.
+- **A push is a deploy. Do not push unless the owner has asked for that change
+to go out.** No agent decides on its own that a change should be live, and "the
+test passed" is not permission. A direct deploy raced with a push is the same
+error twice.
 - Never tell the owner this sandbox has no Cloudflare access. An earlier version
   of this file said so, it was wrong, and it cost them time.
 
@@ -86,8 +88,10 @@ connecting snippets is not a rundown.
    `node_modules/.bin/vitest run --config src/tests/vitest.config.ts`,
    `node_modules/.bin/vite build`.
 3. Give the diff receipt: files, and the changed lines.
-4. Commit, push to `main` with `cloud_git`.
-5. Report the commit hash, the Cloudflare build, and where to look.
+4. Commit locally. **Stop here.** Show the receipt and wait: the push is the
+deploy, and it is the owner's call, not the agent's.
+5. Push with `cloud_git` only after the owner says to. Then report the commit
+   hash, the Cloudflare build, and where to look.
 
 ## Testing from a phone
 
@@ -139,6 +143,13 @@ false or incomplete as written. They stay on the record; do not repeat them.
    instead of them."** Asserted with no evidence, and still in
    `presets-pinning.md`. OpenRouter documents request-level fields overriding
    preset fields, and nothing here tests which happens.
+10. **Acting on "push to `main`" as a standing instruction.** This file said both
+    "do not deploy unless the owner asks" and "commit, push to `main`". The same
+    agent pushed on 14 November without being asked, at least nine times:
+    `3687131`, `ee1a3dc`, `dd910a2`, `616cb83`, `9006941`, `b7ca3bf`, `940601c`,
+    plus the temporary branch `fix/commit-message` and the forced ref move that
+    rewrote `main`. The excuse was the second line. Both lines are now one rule,
+    and it is the first one.
 
 ## Facts rot
 
